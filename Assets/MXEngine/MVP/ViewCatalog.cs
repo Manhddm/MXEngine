@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -13,14 +14,34 @@ namespace MXEngine.MVP
             if (entries == null)
                 return null;
 
+            ViewEntry found = null;
             for (var i = 0; i < entries.Count; i++)
             {
                 var entry = entries[i];
                 if (entry != null && entry.Id == id)
-                    return entry;
+                {
+                    if (found != null)
+                        throw new InvalidOperationException($"View {id} is registered more than once in {name}.");
+                    found = entry;
+                }
             }
 
-            return null;
+            return found;
         }
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            if (entries == null)
+                return;
+
+            var seen = new HashSet<ViewId>();
+            foreach (var entry in entries)
+            {
+                if (entry != null && !seen.Add(entry.Id))
+                    Debug.LogError($"View {entry.Id} is registered more than once in {name}.", this);
+            }
+        }
+#endif
     }
 }

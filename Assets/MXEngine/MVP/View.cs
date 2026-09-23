@@ -1,3 +1,4 @@
+using System;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 
@@ -9,7 +10,10 @@ namespace MXEngine.MVP
         public TState State { get; private set; }
         public async UniTask BindAsync(TState state)
         {
-            State = state;
+            if (State != null)
+                throw new InvalidOperationException("View is already bound.");
+
+            State = state ?? throw new ArgumentNullException(nameof(state));
             await OnBindAsync(state);
         }
         

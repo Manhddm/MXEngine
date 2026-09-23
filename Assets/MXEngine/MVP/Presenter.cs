@@ -45,10 +45,18 @@ namespace MXEngine.MVP
                     _initializationCompletion.TrySetResult();
                 }
             }
-            catch
+            catch (Exception initializationException)
             {
                 // A failed initialization is terminal; release partially bound state.
-                await DisposeAsync();
+                try
+                {
+                    await DisposeAsync();
+                }
+                catch (Exception cleanupException)
+                {
+                    throw new AggregateException("Presenter initialization and cleanup both failed.",
+                        initializationException, cleanupException);
+                }
                 throw;
             }
         }

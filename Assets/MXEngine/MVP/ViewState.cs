@@ -9,8 +9,8 @@ namespace MXEngine.MVP
         {
             if (_disposed) return;
 
-            OnDispose();
             _disposed = true;
+            OnDispose();
         }
 
         protected virtual void OnDispose()

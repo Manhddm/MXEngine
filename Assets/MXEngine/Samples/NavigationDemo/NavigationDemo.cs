@@ -78,6 +78,7 @@ namespace MXEngine.Samples
             closeModalButton.onClick.RemoveListener(OnCloseModal);
             closeAllModalsButton.onClick.RemoveListener(OnCloseAllModals);
             loadingButton.onClick.RemoveListener(OnLoading);
+            _navigation?.ShutdownAsync().Forget(Debug.LogException);
         }
 
         private void OnLobby() => ExecuteAsync(DemoAction.Lobby).Forget();
@@ -94,41 +95,49 @@ namespace MXEngine.Samples
                 return;
 
             _busy = true;
+            var cancellationToken = this.GetCancellationTokenOnDestroy();
             try
             {
                 switch (action)
                 {
                     case DemoAction.Lobby:
                         await _navigation.ShowScreenAsync<NavigationDemoScreenPresenter, NavigationDemoView,
-                            NavigationDemoState>(ViewId.Lobby, view => new NavigationDemoScreenPresenter(view));
+                            NavigationDemoState>(ViewId.Lobby, view => new NavigationDemoScreenPresenter(view),
+                            cancellationToken: cancellationToken);
                         break;
                     case DemoAction.Gameplay:
                         await _navigation.ShowScreenAsync<NavigationDemoScreenPresenter, NavigationDemoView,
-                            NavigationDemoState>(ViewId.Gameplay, view => new NavigationDemoScreenPresenter(view));
+                            NavigationDemoState>(ViewId.Gameplay, view => new NavigationDemoScreenPresenter(view),
+                            cancellationToken: cancellationToken);
                         break;
                     case DemoAction.Settings:
                         await _navigation.ShowModalAsync<NavigationDemoModalPresenter, NavigationDemoView,
-                            NavigationDemoState>(ViewId.Settings, view => new NavigationDemoModalPresenter(view));
+                            NavigationDemoState>(ViewId.Settings, view => new NavigationDemoModalPresenter(view),
+                            cancellationToken: cancellationToken);
                         break;
                     case DemoAction.Back:
-                        await _navigation.BackToPreviousScreenAsync();
+                        await _navigation.BackToPreviousScreenAsync(cancellationToken);
                         break;
                     case DemoAction.CloseModal:
-                        await _navigation.CloseModalAsync();
+                        await _navigation.CloseModalAsync(cancellationToken);
                         break;
                     case DemoAction.CloseAllModals:
-                        await _navigation.CloseAllModalsAsync();
+                        await _navigation.CloseAllModalsAsync(cancellationToken);
                         break;
                     case DemoAction.Loading:
                         if (_loadingVisible)
-                            await _navigation.HideOverlayAsync(ViewId.Loading);
+                            await _navigation.HideOverlayAsync(ViewId.Loading, cancellationToken);
                         else
-                            await _navigation.ShowOverlayAsync<RectTransform>(ViewId.Loading);
+                            await _navigation.ShowOverlayAsync<RectTransform>(ViewId.Loading, cancellationToken);
                         _loadingVisible = !_loadingVisible;
                         break;
                 }
 
                 statusText.text = $"Screens: {_navigation.ScreenCount}    Modals: {_navigation.ModalCount}    Loading: {_loadingVisible}";
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Scene teardown owns navigation cleanup.
             }
             catch (Exception exception)
             {
