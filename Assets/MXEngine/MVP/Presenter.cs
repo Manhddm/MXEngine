@@ -3,7 +3,7 @@ using Cysharp.Threading.Tasks;
 
 namespace MXEngine.MVP
 {
-    public class Presentr<TView, TState> : IDisposable
+    public class Presenter<TView, TState> : IDisposable
         where TView : View<TState>
         where TState : ViewState, new()
     {
@@ -14,7 +14,7 @@ namespace MXEngine.MVP
         private UniTaskCompletionSource _initializationCompletion;
         private UniTaskCompletionSource _disposeCompletion;
 
-        protected Presentr(TView view)
+        protected Presenter(TView view)
         {
             View = view;
         }

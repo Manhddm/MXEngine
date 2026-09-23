@@ -25,7 +25,8 @@ namespace MXEngine.MVP
             AsyncOperationHandle<GameObject> handle = default;
             try
             {
-                handle = reference.InstantiateAsync(stage.transform);
+                // handle = reference.InstantiateAsync(stage.transform);
+               handle = Addressables.InstantiateAsync(reference, stage.transform); 
                 var gObject = await handle.Task;
                 if (handle.Status != AsyncOperationStatus.Succeeded)
                     throw handle.OperationException ?? new InvalidOperationException($"Failed to load view from {reference.AssetGUID}");

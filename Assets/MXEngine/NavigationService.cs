@@ -206,7 +206,7 @@ namespace MXEngine
         public async UniTask<TPresenter> ShowOverlayAsync<TPresenter, TView, TState>(
             ViewId id, Func<TView, TPresenter> createPresenter,
             Action<TPresenter> configurePresenter = null, CancellationToken cancellationToken = default)
-            where TPresenter : Presentr<TView, TState>
+            where TPresenter : Presenter<TView, TState>
             where TView : View<TState>
             where TState : ViewState, new()
         {
@@ -410,7 +410,7 @@ namespace MXEngine
         private async UniTask<(TPresenter presenter, OpenView opened)> CreateAsync<TPresenter, TView, TState>(
             ViewId id, ViewLayer layer, Transform root, Func<TView, TPresenter> createPresenter,
             Action<TPresenter> configurePresenter, CancellationToken cancellationToken)
-            where TPresenter : Presentr<TView, TState>
+            where TPresenter : Presenter<TView, TState>
             where TView : View<TState>
             where TState : ViewState, new()
         {
