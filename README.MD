@@ -1,6 +1,5 @@
 # Hiểu kiến trúc và vòng đời UI của MXEngine
 
-> Phạm vi: implementation trong `Assets/MXEngine`, sample `NavigationDemo`, `Packages/manifest.json` của checkout này. Đây là phân tích source tĩnh; tài liệu không khẳng định đã chạy Play Mode hay build Addressables. `Presentr` là **tên class thật** trong source.
 
 ## 1. MXEngine là gì?
 
