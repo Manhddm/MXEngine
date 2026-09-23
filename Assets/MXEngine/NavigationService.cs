@@ -15,6 +15,7 @@ namespace MXEngine
         private readonly UIRoot _uiRoot;
         private readonly SemaphoreSlim _gate = new(1, 1);
         private readonly Stack<OpenView> _screens = new();
+        private readonly Stack<OpenView> _screenReorderBuffer = new();
         private readonly Stack<OpenView> _modals = new();
         private readonly Dictionary<ViewId, OpenView> _overlays = new();
 
@@ -39,6 +40,35 @@ namespace MXEngine
             await _gate.WaitAsync();
             try
             {
+                if (stack && _screens.Count > 0 && _screens.Peek().Id == id)
+                    return GetScreenPresenter<TPresenter>(_screens.Peek(), id);
+
+                if (stack)
+                {
+                    OpenView existing = null;
+                    foreach (var screen in _screens)
+                    {
+                        if (screen.Id != id)
+                            continue;
+                        existing = screen;
+                        break;
+                    }
+
+                    if (existing != null)
+                    {
+                        var existingPresenter = GetScreenPresenter<TPresenter>(existing, id);
+                        while (!ReferenceEquals(_screens.Peek(), existing))
+                            _screenReorderBuffer.Push(_screens.Pop());
+                        _screens.Pop();
+                        while (_screenReorderBuffer.Count > 0)
+                            _screens.Push(_screenReorderBuffer.Pop());
+                        _screens.Peek().View.gameObject.SetActive(false);
+                        _screens.Push(existing);
+                        existing.View.gameObject.SetActive(true);
+                        return existingPresenter;
+                    }
+                }
+
                 var (presenter, opened) = await CreateAsync<TPresenter, TView, TState>(id, ViewLayer.Screen,
                     _uiRoot.ScreenRoot, createPresenter, configurePresenter);
                 try
@@ -148,7 +178,7 @@ namespace MXEngine
 
                 var entry = GetEntry(id, ViewLayer.Overlay);
                 var view = await _loader.LoadAsync<TView>(entry.Reference, _uiRoot.OverlayRoot);
-                _overlays.Add(id, new OpenView(view, null));
+                _overlays.Add(id, new OpenView(id, view, null, null));
                 return view;
             }
             finally
@@ -243,6 +273,13 @@ namespace MXEngine
             return entry;
         }
 
+        private static TPresenter GetScreenPresenter<TPresenter>(OpenView screen, ViewId id)
+        {
+            if (screen.Presenter is TPresenter presenter)
+                return presenter;
+            throw new InvalidOperationException($"Screen {id} was opened with a different presenter type.");
+        }
+
         private async UniTask<(TPresenter presenter, OpenView opened)> CreateAsync<TPresenter, TView, TState>(
             ViewId id, ViewLayer layer, Transform root, Func<TView, TPresenter> createPresenter,
             Action<TPresenter> configurePresenter)
@@ -265,7 +302,7 @@ namespace MXEngine
                     throw new InvalidOperationException($"Presenter factory for {id} returned null.");
                 configurePresenter?.Invoke(presenter);
                 await presenter.InitializeAsync();
-                return (presenter, new OpenView(view, presenter.DisposeAsync));
+                return (presenter, new OpenView(id, view, presenter, presenter.DisposeAsync));
             }
             catch
             {
@@ -297,12 +334,16 @@ namespace MXEngine
 
         private sealed class OpenView
         {
+            public readonly ViewId Id;
             public readonly Component View;
+            public readonly object Presenter;
             public readonly Func<UniTask> DisposePresenter;
 
-            public OpenView(Component view, Func<UniTask> disposePresenter)
+            public OpenView(ViewId id, Component view, object presenter, Func<UniTask> disposePresenter)
             {
+                Id = id;
                 View = view;
+                Presenter = presenter;
                 DisposePresenter = disposePresenter;
             }
         }
