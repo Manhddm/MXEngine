@@ -10,7 +10,17 @@ namespace MXEngine.MVP
 
         public ViewEntry Get(ViewId id)
         {
-            return entries.Find(x => x.Id == id);
+            if (entries == null)
+                return null;
+
+            for (var i = 0; i < entries.Count; i++)
+            {
+                var entry = entries[i];
+                if (entry != null && entry.Id == id)
+                    return entry;
+            }
+
+            return null;
         }
     }
 }

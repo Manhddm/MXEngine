@@ -18,8 +18,14 @@ namespace MXEngine.MVP
             if (State == null)
                 return;
 
-            await OnUnbindAsync(State);
-            State = null;
+            try
+            {
+                await OnUnbindAsync(State);
+            }
+            finally
+            {
+                State = null;
+            }
         }
         protected abstract UniTask OnBindAsync(TState state);
         protected virtual UniTask OnUnbindAsync(TState state)
