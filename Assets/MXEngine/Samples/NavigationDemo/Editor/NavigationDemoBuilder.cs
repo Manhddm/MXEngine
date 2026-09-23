@@ -175,10 +175,10 @@ namespace MXEngine.Samples.Editor
 
             var entries = new List<ViewEntry>
             {
-                Register(ViewId.Lobby, ViewLayer.Screen, lobby),
-                Register(ViewId.Gameplay, ViewLayer.Screen, gameplay),
-                Register(ViewId.Settings, ViewLayer.Modal, settings),
-                Register(ViewId.Loading, ViewLayer.Overlay, loading)
+                Register(GameViewId.Lobby, ViewLayer.Screen, lobby),
+                Register(GameViewId.Gameplay, ViewLayer.Screen, gameplay),
+                Register(GameViewId.Settings, ViewLayer.Modal, settings),
+                Register(GameViewId.Loading, ViewLayer.Overlay, loading)
             };
             typeof(ViewCatalog).GetField("entries", BindingFlags.Instance | BindingFlags.NonPublic)
                 ?.SetValue(catalog, entries);
@@ -186,7 +186,7 @@ namespace MXEngine.Samples.Editor
             return catalog;
         }
 
-        private static ViewEntry Register(ViewId id, ViewLayer layer, string path)
+        private static ViewEntry Register(int id, ViewLayer layer, string path)
         {
             var settings = AddressableAssetSettingsDefaultObject.GetSettings(true);
             if (settings == null || settings.DefaultGroup == null)

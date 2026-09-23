@@ -9,7 +9,7 @@ namespace MXEngine.MVP
     {
         [SerializeField] private List<ViewEntry> entries;
 
-        public ViewEntry Get(ViewId id)
+        public ViewEntry Get(int id)
         {
             if (entries == null)
                 return null;
@@ -35,7 +35,7 @@ namespace MXEngine.MVP
             if (entries == null)
                 return;
 
-            var seen = new HashSet<ViewId>();
+            var seen = new HashSet<int>();
             foreach (var entry in entries)
             {
                 if (entry != null && !seen.Add(entry.Id))

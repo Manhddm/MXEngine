@@ -1,0 +1,1 @@
+{"name":"MXEngine","rootNamespace":"MXEngine","references":["UniTask","Unity.Addressables","Unity.ResourceManager"],"autoReferenced":true}

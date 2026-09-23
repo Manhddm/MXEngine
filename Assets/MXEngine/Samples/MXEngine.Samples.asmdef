@@ -1,0 +1,1 @@
+{"name":"MXEngine.Samples","rootNamespace":"MXEngine.Samples","references":["MXEngine","UniTask","Unity.Addressables","Unity.ugui"],"autoReferenced":true}

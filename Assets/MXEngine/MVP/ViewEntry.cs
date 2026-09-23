@@ -5,7 +5,7 @@ namespace MXEngine.MVP
     [System.Serializable]
     public class ViewEntry
     {
-        public ViewId Id;
+        public int Id;
         public AssetReferenceGameObject Reference;
         public ViewLayer Layer;
     }

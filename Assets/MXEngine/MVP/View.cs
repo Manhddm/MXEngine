@@ -1,4 +1,6 @@
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 
@@ -8,17 +10,26 @@ namespace MXEngine.MVP
         where TState : ViewState
     {
         public TState State { get; private set; }
-        public async UniTask BindAsync(TState state)
+        public UniTask BindAsync(TState state, CancellationToken cancellationToken = default) =>
+            BindCoreAsync(state, cancellationToken).AsUniTask();
+
+        private async Task BindCoreAsync(TState state, CancellationToken cancellationToken)
         {
+            using var context = LifecycleContext.Enter();
+            cancellationToken.ThrowIfCancellationRequested();
             if (State != null)
                 throw new InvalidOperationException("View is already bound.");
 
             State = state ?? throw new ArgumentNullException(nameof(state));
-            await OnBindAsync(state);
+            await OnBindAsync(state, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
         }
         
-        public async UniTask UnbindAsync()
+        public UniTask UnbindAsync() => UnbindCoreAsync().AsUniTask();
+
+        private async Task UnbindCoreAsync()
         {
+            using var context = LifecycleContext.Enter();
             if (State == null)
                 return;
 
@@ -31,10 +42,10 @@ namespace MXEngine.MVP
                 State = null;
             }
         }
-        protected abstract UniTask OnBindAsync(TState state);
-        protected virtual UniTask OnUnbindAsync(TState state)
+        protected abstract Task OnBindAsync(TState state, CancellationToken cancellationToken);
+        protected virtual Task OnUnbindAsync(TState state)
         {
-            return UniTask.CompletedTask;
+            return Task.CompletedTask;
         }
         
     }

@@ -102,17 +102,17 @@ namespace MXEngine.Samples
                 {
                     case DemoAction.Lobby:
                         await _navigation.ShowScreenAsync<NavigationDemoScreenPresenter, NavigationDemoView,
-                            NavigationDemoState>(ViewId.Lobby, view => new NavigationDemoScreenPresenter(view),
+                            NavigationDemoState>(GameViewId.Lobby, view => new NavigationDemoScreenPresenter(view),
                             cancellationToken: cancellationToken);
                         break;
                     case DemoAction.Gameplay:
                         await _navigation.ShowScreenAsync<NavigationDemoScreenPresenter, NavigationDemoView,
-                            NavigationDemoState>(ViewId.Gameplay, view => new NavigationDemoScreenPresenter(view),
+                            NavigationDemoState>(GameViewId.Gameplay, view => new NavigationDemoScreenPresenter(view),
                             cancellationToken: cancellationToken);
                         break;
                     case DemoAction.Settings:
                         await _navigation.ShowModalAsync<NavigationDemoModalPresenter, NavigationDemoView,
-                            NavigationDemoState>(ViewId.Settings, view => new NavigationDemoModalPresenter(view),
+                            NavigationDemoState>(GameViewId.Settings, view => new NavigationDemoModalPresenter(view),
                             cancellationToken: cancellationToken);
                         break;
                     case DemoAction.Back:
@@ -126,14 +126,15 @@ namespace MXEngine.Samples
                         break;
                     case DemoAction.Loading:
                         if (_loadingVisible)
-                            await _navigation.HideOverlayAsync(ViewId.Loading, cancellationToken);
+                            await _navigation.HideOverlayAsync(GameViewId.Loading, cancellationToken);
                         else
-                            await _navigation.ShowOverlayAsync<RectTransform>(ViewId.Loading, cancellationToken);
+                            await _navigation.ShowOverlayAsync<RectTransform>(GameViewId.Loading, cancellationToken);
                         _loadingVisible = !_loadingVisible;
                         break;
                 }
 
-                statusText.text = $"Screens: {_navigation.ScreenCount}    Modals: {_navigation.ModalCount}    Loading: {_loadingVisible}";
+                if (statusText != null)
+                    statusText.text = $"Screens: {_navigation.ScreenCount}    Modals: {_navigation.ModalCount}    Loading: {_loadingVisible}";
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -142,7 +143,8 @@ namespace MXEngine.Samples
             catch (Exception exception)
             {
                 Debug.LogException(exception, this);
-                statusText.text = $"Navigation error: {exception.Message}";
+                if (statusText != null)
+                    statusText.text = $"Navigation error: {exception.Message}";
             }
             finally
             {

@@ -1,0 +1,1 @@
+{"name":"MXEngine.Tests","rootNamespace":"MXEngine.Tests","references":["MXEngine","UniTask","Unity.Addressables","Unity.ResourceManager","Unity.ugui"],"optionalUnityReferences":["TestAssemblies"],"autoReferenced":false}

@@ -11,7 +11,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 373c06b898c74a3fb4284c702cbab624, type: 3}
   m_Name: NavigationDemoCatalog
-  m_EditorClassIdentifier: Assembly-CSharp::MXEngine.MVP.ViewCatalog
+  m_EditorClassIdentifier: MXEngine::MXEngine.MVP.ViewCatalog
   entries:
   - Id: 0
     Reference:

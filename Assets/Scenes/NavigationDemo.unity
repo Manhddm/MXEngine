@@ -1913,7 +1913,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 14ce5fd0ad1d93248b76a9732dabe597, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::MXEngine.Samples.NavigationDemo
+  m_EditorClassIdentifier: MXEngine.Samples::MXEngine.Samples.NavigationDemo
   uiRoot: {fileID: 1603684021}
   catalog: {fileID: 11400000, guid: 80af5e2ec6055d34f85dc433449eb395, type: 2}
   lobbyButton: {fileID: 313971675}
@@ -1935,7 +1935,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 92538f4627b541ce81a9bef82a6c57c4, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::MXEngine.UIRoot
+  m_EditorClassIdentifier: MXEngine::MXEngine.UIRoot
   <ScreenRoot>k__BackingField: {fileID: 2121121789}
   <ModalRoot>k__BackingField: {fileID: 1416688117}
   <OverlayRoot>k__BackingField: {fileID: 1887216719}

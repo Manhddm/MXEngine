@@ -1,0 +1,1 @@
+{"name":"MXEngine.Samples.Editor","rootNamespace":"MXEngine.Samples.Editor","references":["MXEngine","MXEngine.Samples","Unity.Addressables","Unity.Addressables.Editor","Unity.ResourceManager","Unity.InputSystem","Unity.ugui"],"includePlatforms":["Editor"],"autoReferenced":true}

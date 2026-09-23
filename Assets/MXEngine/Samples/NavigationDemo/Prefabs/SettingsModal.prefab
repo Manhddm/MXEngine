@@ -326,4 +326,4 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a833ab6446eb60c4e8c0755575d57313, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::MXEngine.Samples.NavigationDemoView
+  m_EditorClassIdentifier: MXEngine.Samples::MXEngine.Samples.NavigationDemoView
