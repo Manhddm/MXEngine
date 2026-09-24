@@ -14,6 +14,7 @@ namespace MXEngine.MVP
     {
         private readonly Dictionary<Component, AsyncOperationHandle<GameObject>> _instances =
             new(new ComponentReferenceComparer());
+
         private readonly List<AbandonedLoad> _abandoned = new();
         public int OwnedInstanceCount => _instances.Count;
         public int PendingCleanupCount => _abandoned.Count;
@@ -41,7 +42,8 @@ namespace MXEngine.MVP
                 var instance = await AwaitHandleAsync(handle, cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
                 if (handle.Status != AsyncOperationStatus.Succeeded)
-                    throw handle.OperationException ?? new InvalidOperationException($"Failed to load {reference.AssetGUID}.");
+                    throw handle.OperationException ??
+                          new InvalidOperationException($"Failed to load {reference.AssetGUID}.");
                 if (instance == null || !instance.TryGetComponent<T>(out var view))
                     throw new InvalidOperationException($"View {reference.AssetGUID} is missing {typeof(T).Name}.");
                 ViewActivation.PrepareForBinding(instance, parent);
@@ -116,10 +118,14 @@ namespace MXEngine.MVP
                     }
                     else Addressables.Release(handle);
                 }
+
                 DestroyStage(pending.Stage);
                 _abandoned.Remove(pending);
             }
-            catch (Exception exception) { Debug.LogException(exception); }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception);
+            }
         }
 
         private static void DestroyStage(GameObject stage)
@@ -133,8 +139,12 @@ namespace MXEngine.MVP
         {
             internal readonly AsyncOperationHandle<GameObject> Handle;
             internal readonly GameObject Stage;
+
             internal AbandonedLoad(AsyncOperationHandle<GameObject> handle, GameObject stage)
-            { Handle = handle; Stage = stage; }
+            {
+                Handle = handle;
+                Stage = stage;
+            }
         }
 
         private sealed class ComponentReferenceComparer : IEqualityComparer<Component>

@@ -91,6 +91,7 @@ namespace MXEngine.Tests
             await Fails<OperationCanceledException>(() => modal);
             await closing;
             await AssertEmpty();
+            
         });
 
         [UnityTest] public IEnumerator CallerCancellationDuringCommittedTeardownDoesNotAbortCleanup() => Run(async () =>

@@ -2,6 +2,7 @@ using System;
 using Cysharp.Threading.Tasks;
 using MXEngine.MVP;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 namespace MXEngine.Samples
@@ -26,8 +27,6 @@ namespace MXEngine.Samples
 
     public sealed class NavigationDemo : MonoBehaviour
     {
-        [SerializeField] private UIRoot uiRoot;
-        [SerializeField] private ViewCatalog catalog;
         [SerializeField] private Button lobbyButton;
         [SerializeField] private Button gameplayButton;
         [SerializeField] private Button settingsButton;
@@ -54,7 +53,7 @@ namespace MXEngine.Samples
 
         private void Awake()
         {
-            _navigation = new NavigationService(new AddressableViewLoader(), catalog, uiRoot);
+            // _navigation = new NavigationService(new AddressableViewLoader(), catalog, uiRoot);
             lobbyButton.onClick.AddListener(OnLobby);
             gameplayButton.onClick.AddListener(OnGameplay);
             settingsButton.onClick.AddListener(OnSettings);
@@ -66,6 +65,7 @@ namespace MXEngine.Samples
 
         private void Start()
         {
+            _navigation = GameController.Instance.Navigation;
             ExecuteAsync(DemoAction.Lobby).Forget();
         }
 
@@ -82,7 +82,12 @@ namespace MXEngine.Samples
         }
 
         private void OnLobby() => ExecuteAsync(DemoAction.Lobby).Forget();
-        private void OnGameplay() => ExecuteAsync(DemoAction.Gameplay).Forget();
+
+        private void OnGameplay()
+        {
+            SceneManager.LoadScene("Gameplay", LoadSceneMode.Additive);
+            ExecuteAsync(DemoAction.Gameplay).Forget();
+        }
         private void OnSettings() => ExecuteAsync(DemoAction.Settings).Forget();
         private void OnBack() => ExecuteAsync(DemoAction.Back).Forget();
         private void OnCloseModal() => ExecuteAsync(DemoAction.CloseModal).Forget();
