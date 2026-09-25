@@ -19,33 +19,37 @@ namespace MXEngine.MVP
         public int OwnedInstanceCount => _instances.Count;
         public int PendingCleanupCount => _abandoned.Count;
 
-        public UniTask<T> LoadAsync<T>(AssetReferenceGameObject reference, Transform parent,
+        public UniTask<T> LoadAsync<T>(string address, Transform parent,
             CancellationToken cancellationToken = default) where T : Component =>
-            LoadCoreAsync<T>(reference, parent, cancellationToken).AsUniTask();
+            LoadCoreAsync<T>(address, parent, cancellationToken).AsUniTask();
 
-        private async Task<T> LoadCoreAsync<T>(AssetReferenceGameObject reference, Transform parent,
+        private async Task<T> LoadCoreAsync<T>(string address, Transform parent,
             CancellationToken cancellationToken) where T : Component
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (reference == null) throw new ArgumentNullException(nameof(reference));
+            if (string.IsNullOrWhiteSpace(address))
+                throw new ArgumentException("Addressable address cannot be empty.", nameof(address));
             if (parent == null || !parent.gameObject.activeInHierarchy)
                 throw new InvalidOperationException("View parent must be active in the hierarchy.");
+
             var stage = new GameObject("MXEngine View Stage", typeof(RectTransform));
             stage.SetActive(false);
             stage.transform.SetParent(parent, false);
             AsyncOperationHandle<GameObject> handle = default;
             try
             {
-                handle = Addressables.InstantiateAsync(reference, stage.transform);
+                handle = Addressables.InstantiateAsync(address, stage.transform);
                 // Stop awaiting on cancellation without releasing a still-running handle.
                 // Task's await captures Unity's synchronization context for cleanup.
                 var instance = await AwaitHandleAsync(handle, cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
                 if (handle.Status != AsyncOperationStatus.Succeeded)
                     throw handle.OperationException ??
-                          new InvalidOperationException($"Failed to load {reference.AssetGUID}.");
+                          new InvalidOperationException($"Failed to load Addressable '{address}'.");
                 if (instance == null || !instance.TryGetComponent<T>(out var view))
-                    throw new InvalidOperationException($"View {reference.AssetGUID} is missing {typeof(T).Name}.");
+                    throw new InvalidOperationException(
+                        $"Addressable '{address}' is missing {typeof(T).Name}.");
+
                 ViewActivation.PrepareForBinding(instance, parent);
                 cancellationToken.ThrowIfCancellationRequested();
                 _instances.Add(view, handle);
@@ -116,7 +120,10 @@ namespace MXEngine.MVP
                         if (!Addressables.ReleaseInstance(handle))
                             throw new InvalidOperationException("Addressables did not release an abandoned instance.");
                     }
-                    else Addressables.Release(handle);
+                    else
+                    {
+                        Addressables.Release(handle);
+                    }
                 }
 
                 DestroyStage(pending.Stage);
