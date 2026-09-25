@@ -42,6 +42,7 @@ namespace MXEngine.Tests
         [UnityTest] public IEnumerator SameTopScreenIsReused() => Run(async () =>
         {
             var a = await Screen();
+            Assert.AreEqual(A, Loader.LastKey);
             Assert.AreSame(a, await Screen());
             Assert.AreEqual(1, Loader.Created.Count);
             await AssertEmpty();

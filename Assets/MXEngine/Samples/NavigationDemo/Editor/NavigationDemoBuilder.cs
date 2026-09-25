@@ -1,12 +1,9 @@
 using System;
-using System.Collections.Generic;
-using System.Reflection;
 using MXEngine.MVP;
 using UnityEditor;
 using UnityEditor.AddressableAssets;
 using UnityEditor.SceneManagement;
 using UnityEngine;
-using UnityEngine.AddressableAssets;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem.UI;
 using UnityEngine.UI;
@@ -32,7 +29,10 @@ namespace MXEngine.Samples.Editor
             var settings = CreateModalPrefab();
             var loading = CreateLoadingPrefab();
 
-            var catalog = CreateCatalog(lobby, gameplay, settings, loading);
+            Register(GameViewKey.Lobby, lobby);
+            Register(GameViewKey.Gameplay, gameplay);
+            Register(GameViewKey.Settings, settings);
+            Register(GameViewKey.Loading, loading);
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             var canvasObject = new GameObject("Navigation Demo Canvas", typeof(RectTransform), typeof(Canvas),
                 typeof(CanvasScaler), typeof(GraphicRaycaster), typeof(UIRoot), typeof(NavigationDemo));
@@ -54,6 +54,12 @@ namespace MXEngine.Samples.Editor
             rootProperties.FindProperty("<ModalRoot>k__BackingField").objectReferenceValue = modalRoot;
             rootProperties.FindProperty("<OverlayRoot>k__BackingField").objectReferenceValue = overlayRoot;
             rootProperties.ApplyModifiedPropertiesWithoutUndo();
+
+            var controllerObject = new GameObject("GameController", typeof(GameController));
+            var controllerProperties = new SerializedObject(controllerObject.GetComponent<GameController>());
+            controllerProperties.FindProperty("canvas").objectReferenceValue = canvas;
+            controllerProperties.FindProperty("uiRoot").objectReferenceValue = uiRoot;
+            controllerProperties.ApplyModifiedPropertiesWithoutUndo();
 
             var header = CreateFullStretch("Status Bar", canvasTransform);
             header.anchorMin = new Vector2(0, 1);
@@ -97,7 +103,6 @@ namespace MXEngine.Samples.Editor
             var demo = canvasObject.GetComponent<NavigationDemo>();
             var demoProperties = new SerializedObject(demo);
             demoProperties.FindProperty("uiRoot").objectReferenceValue = uiRoot;
-            demoProperties.FindProperty("catalog").objectReferenceValue = catalog;
             demoProperties.FindProperty("lobbyButton").objectReferenceValue = buttons[0];
             demoProperties.FindProperty("gameplayButton").objectReferenceValue = buttons[1];
             demoProperties.FindProperty("settingsButton").objectReferenceValue = buttons[2];
@@ -163,30 +168,7 @@ namespace MXEngine.Samples.Editor
             return SavePrefab(root.gameObject, "LoadingOverlay");
         }
 
-        private static ViewCatalog CreateCatalog(string lobby, string gameplay, string settings, string loading)
-        {
-            var path = BasePath + "/NavigationDemoCatalog.asset";
-            var catalog = AssetDatabase.LoadAssetAtPath<ViewCatalog>(path);
-            if (catalog == null)
-            {
-                catalog = ScriptableObject.CreateInstance<ViewCatalog>();
-                AssetDatabase.CreateAsset(catalog, path);
-            }
-
-            var entries = new List<ViewEntry>
-            {
-                Register(GameViewId.Lobby, ViewLayer.Screen, lobby),
-                Register(GameViewId.Gameplay, ViewLayer.Screen, gameplay),
-                Register(GameViewId.Settings, ViewLayer.Modal, settings),
-                Register(GameViewId.Loading, ViewLayer.Overlay, loading)
-            };
-            typeof(ViewCatalog).GetField("entries", BindingFlags.Instance | BindingFlags.NonPublic)
-                ?.SetValue(catalog, entries);
-            EditorUtility.SetDirty(catalog);
-            return catalog;
-        }
-
-        private static ViewEntry Register(int id, ViewLayer layer, string path)
+        private static void Register(string key, string path)
         {
             var settings = AddressableAssetSettingsDefaultObject.GetSettings(true);
             if (settings == null || settings.DefaultGroup == null)
@@ -194,14 +176,8 @@ namespace MXEngine.Samples.Editor
 
             var guid = AssetDatabase.AssetPathToGUID(path);
             var addressableEntry = settings.CreateOrMoveEntry(guid, settings.DefaultGroup);
-            addressableEntry.address = "NavigationDemo/" + id;
+            addressableEntry.address = key;
             EditorUtility.SetDirty(settings);
-            return new ViewEntry
-            {
-                Id = id,
-                Layer = layer,
-                Reference = new AssetReferenceGameObject(guid)
-            };
         }
 
         private static string SavePrefab(GameObject root, string name)

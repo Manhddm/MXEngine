@@ -1853,7 +1853,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DEMO_TEST.Scripts.GameController
   canvas: {fileID: 1603684024}
-  viewCatalog: {fileID: 11400000, guid: 80af5e2ec6055d34f85dc433449eb395, type: 2}
   uiRoot: {fileID: 1603684021}
 --- !u!4 &1358776925
 Transform:

@@ -7,7 +7,6 @@ namespace MXEngine.Samples
     {
         public static GameController Instance { get; private set; }
         [SerializeField] private Canvas canvas;
-        [SerializeField] private ViewCatalog viewCatalog;
         [SerializeField] private UIRoot uiRoot;
         private NavigationService _navigation;
         private Canvas Canvas => canvas;
@@ -16,7 +15,7 @@ namespace MXEngine.Samples
         {
             if (Instance == null) Instance = this;
             DontDestroyOnLoad(gameObject);
-            _navigation = new NavigationService(new AddressableViewLoader(), viewCatalog, uiRoot);
+            _navigation = new NavigationService(new AddressableViewLoader(), uiRoot);
         }
     }
 }

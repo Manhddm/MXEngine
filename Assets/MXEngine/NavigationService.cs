@@ -11,14 +11,13 @@ namespace MXEngine
     public sealed class NavigationService
     {
         private readonly IViewLoader _loader;
-        private readonly ViewCatalog _catalog;
         private readonly UIRoot _uiRoot;
         private readonly SemaphoreSlim _gate = new(1, 1);
         private readonly SemaphoreSlim _overlayGate = new(1, 1);
         private readonly Stack<OpenView> _screens = new();
         private readonly Stack<OpenView> _screenReorderBuffer = new();
         private readonly Stack<OpenView> _modals = new();
-        private readonly Dictionary<int, OpenView> _overlays = new();
+        private readonly Dictionary<string, OpenView> _overlays = new();
         private readonly object _shutdownSync = new();
         private UniTaskCompletionSource _shutdownCompletion;
         private volatile bool _shutdownRequested;
@@ -34,15 +33,14 @@ namespace MXEngine
         public int PendingReleaseCount => _pendingReleases.Count;
         public bool IsInTransition => _gate.CurrentCount == 0 || _overlayGate.CurrentCount == 0;
 
-        public NavigationService(IViewLoader loader, ViewCatalog catalog, UIRoot uiRoot)
+        public NavigationService(IViewLoader loader, UIRoot uiRoot)
         {
             _loader = loader ?? throw new ArgumentNullException(nameof(loader));
-            _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
             _uiRoot = uiRoot ?? throw new ArgumentNullException(nameof(uiRoot));
         }
 
         public async UniTask<TPresenter> ShowScreenAsync<TPresenter, TView, TState>(
-            int id, Func<TView, TPresenter> createPresenter, bool stack = true,
+            string key, Func<TView, TPresenter> createPresenter, bool stack = true,
             Action<TPresenter> configurePresenter = null, CancellationToken cancellationToken = default)
             where TPresenter : ScreenPresenter<TView, TState>
             where TView : View<TState>
@@ -56,15 +54,16 @@ namespace MXEngine
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 ThrowIfUnavailable();
-                if (stack && _screens.Count > 0 && _screens.Peek().Id == id)
-                    return GetScreenPresenter<TPresenter>(_screens.Peek(), id);
+                ValidateKey(key);
+                if (stack && _screens.Count > 0 && _screens.Peek().Key == key)
+                    return GetScreenPresenter<TPresenter>(_screens.Peek(), key);
 
                 if (stack)
                 {
                     OpenView existing = null;
                     foreach (var screen in _screens)
                     {
-                        if (screen.Id != id)
+                        if (screen.Key != key)
                             continue;
                         existing = screen;
                         break;
@@ -72,7 +71,7 @@ namespace MXEngine
 
                     if (existing != null)
                     {
-                        var existingPresenter = GetScreenPresenter<TPresenter>(existing, id);
+                        var existingPresenter = GetScreenPresenter<TPresenter>(existing, key);
                         var current = _screens.Peek();
                         SetActive(current, false);
                         try
@@ -100,7 +99,7 @@ namespace MXEngine
                     }
                 }
 
-                var (presenter, opened) = await CreateAsync<TPresenter, TView, TState>(id, ViewLayer.Screen,
+                var (presenter, opened) = await CreateAsync<TPresenter, TView, TState>(key, "Screen",
                     _uiRoot.ScreenRoot, createPresenter, configurePresenter, cancellationToken);
                 var committed = false;
                 try
@@ -187,7 +186,7 @@ namespace MXEngine
         }
 
         public async UniTask<TPresenter> ShowModalAsync<TPresenter, TView, TState>(
-            int id, Func<TView, TPresenter> createPresenter,
+            string key, Func<TView, TPresenter> createPresenter,
             Action<TPresenter> configurePresenter = null, CancellationToken cancellationToken = default)
             where TPresenter : ModalPresenter<TView, TState>
             where TView : View<TState>
@@ -201,7 +200,7 @@ namespace MXEngine
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 ThrowIfUnavailable();
-                var (presenter, opened) = await CreateAsync<TPresenter, TView, TState>(id, ViewLayer.Modal,
+                var (presenter, opened) = await CreateAsync<TPresenter, TView, TState>(key, "Modal",
                     _uiRoot.ModalRoot, createPresenter, configurePresenter, cancellationToken);
                 try
                 {
@@ -233,7 +232,7 @@ namespace MXEngine
         }
 
         public async UniTask<TPresenter> ShowOverlayAsync<TPresenter, TView, TState>(
-            int id, Func<TView, TPresenter> createPresenter,
+            string key, Func<TView, TPresenter> createPresenter,
             Action<TPresenter> configurePresenter = null, CancellationToken cancellationToken = default)
             where TPresenter : Presenter<TView, TState>
             where TView : View<TState>
@@ -247,10 +246,11 @@ namespace MXEngine
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 ThrowIfUnavailable();
-                if (_overlays.ContainsKey(id))
-                    throw new InvalidOperationException($"Overlay {id} is already open.");
+                ValidateKey(key);
+                if (_overlays.ContainsKey(key))
+                    throw new InvalidOperationException($"Overlay {key} is already open.");
 
-                var (presenter, opened) = await CreateAsync<TPresenter, TView, TState>(id, ViewLayer.Overlay,
+                var (presenter, opened) = await CreateAsync<TPresenter, TView, TState>(key, "Overlay",
                     _uiRoot.OverlayRoot, createPresenter, configurePresenter, cancellationToken);
                 try
                 {
@@ -258,7 +258,7 @@ namespace MXEngine
                     ThrowIfShuttingDown();
                     SetActive(opened, true);
                     cancellationToken.ThrowIfCancellationRequested();
-                    _overlays.Add(id, opened);
+                    _overlays.Add(key, opened);
                     return presenter;
                 }
                 catch (Exception openException)
@@ -282,7 +282,7 @@ namespace MXEngine
         }
 
         // Useful for loading overlays with no state or presenter.
-        public async UniTask<TView> ShowOverlayAsync<TView>(int id,
+        public async UniTask<TView> ShowOverlayAsync<TView>(string key,
             CancellationToken cancellationToken = default) where TView : Component
         {
             ThrowIfUnavailable();
@@ -293,29 +293,29 @@ namespace MXEngine
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 ThrowIfUnavailable();
-                if (_overlays.ContainsKey(id))
-                    throw new InvalidOperationException($"Overlay {id} is already open.");
+                ValidateKey(key);
+                if (_overlays.ContainsKey(key))
+                    throw new InvalidOperationException($"Overlay {key} is already open.");
                 if (_uiRoot.OverlayRoot == null)
                     throw new InvalidOperationException("UI root for Overlay is not assigned.");
 
-                var entry = GetEntry(id, ViewLayer.Overlay);
-                var view = await _loader.LoadAsync<TView>(entry.Reference, _uiRoot.OverlayRoot, cancellationToken);
+                var view = await _loader.LoadAsync<TView>(key, _uiRoot.OverlayRoot, cancellationToken);
                 try
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     ThrowIfShuttingDown();
                     if (view == null)
-                        throw new InvalidOperationException($"Loader returned no View for {id}.");
+                        throw new InvalidOperationException($"Loader returned no View for {key}.");
                     SetActive(view, true);
                     cancellationToken.ThrowIfCancellationRequested();
-                    _overlays.Add(id, new OpenView(id, view, null, null));
+                    _overlays.Add(key, new OpenView(key, view, null, null));
                     return view;
                 }
                 catch (Exception openException)
                 {
                     try
                     {
-                        await ReleaseAsync(new OpenView(id, view, null, null));
+                        await ReleaseAsync(new OpenView(key, view, null, null));
                     }
                     catch (Exception cleanupException)
                     {
@@ -413,7 +413,7 @@ namespace MXEngine
             }
         }
 
-        public async UniTask<bool> HideOverlayAsync(int id,
+        public async UniTask<bool> HideOverlayAsync(string key,
             CancellationToken cancellationToken = default)
         {
             ThrowIfUnavailable();
@@ -424,10 +424,11 @@ namespace MXEngine
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 ThrowIfUnavailable();
-                if (!_overlays.TryGetValue(id, out var opened))
+                ValidateKey(key);
+                if (!_overlays.TryGetValue(key, out var opened))
                     return false;
 
-                _overlays.Remove(id);
+                _overlays.Remove(key);
                 var error = await TryReleaseAsync(opened);
                 if (error != null) ReportCleanupFailure(error);
                 return true;
@@ -438,27 +439,21 @@ namespace MXEngine
             }
         }
 
-        private ViewEntry GetEntry(int id, ViewLayer layer)
+        private static void ValidateKey(string key)
         {
-            var entry = _catalog.Get(id);
-            if (entry == null)
-                throw new InvalidOperationException($"View {id} is not registered in the catalog.");
-            if (entry.Layer != layer)
-                throw new InvalidOperationException($"View {id} belongs to {entry.Layer}, not {layer}.");
-            if (entry.Reference == null || !entry.Reference.RuntimeKeyIsValid())
-                throw new InvalidOperationException($"View {id} has no valid Addressable reference.");
-            return entry;
+            if (string.IsNullOrWhiteSpace(key))
+                throw new ArgumentException("View key is required.", nameof(key));
         }
 
-        private static TPresenter GetScreenPresenter<TPresenter>(OpenView screen, int id)
+        private static TPresenter GetScreenPresenter<TPresenter>(OpenView screen, string key)
         {
             if (screen.Presenter is TPresenter presenter)
                 return presenter;
-            throw new InvalidOperationException($"Screen {id} was opened with a different presenter type.");
+            throw new InvalidOperationException($"Screen {key} was opened with a different presenter type.");
         }
 
         private async UniTask<(TPresenter presenter, OpenView opened)> CreateAsync<TPresenter, TView, TState>(
-            int id, ViewLayer layer, Transform root, Func<TView, TPresenter> createPresenter,
+            string key, string layer, Transform root, Func<TView, TPresenter> createPresenter,
             Action<TPresenter> configurePresenter, CancellationToken cancellationToken)
             where TPresenter : Presenter<TView, TState>
             where TView : View<TState>
@@ -466,35 +461,35 @@ namespace MXEngine
         {
             if (createPresenter == null)
                 throw new ArgumentNullException(nameof(createPresenter));
+            ValidateKey(key);
             if (root == null)
                 throw new InvalidOperationException($"UI root for {layer} is not assigned.");
 
-            var entry = GetEntry(id, layer);
-            var view = await _loader.LoadAsync<TView>(entry.Reference, root, cancellationToken);
+            var view = await _loader.LoadAsync<TView>(key, root, cancellationToken);
             TPresenter presenter = null;
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 ThrowIfShuttingDown();
                 if (view == null)
-                    throw new InvalidOperationException($"Loader returned no View for {id}.");
+                    throw new InvalidOperationException($"Loader returned no View for {key}.");
                 SetActive(view, false);
                 using (LifecycleContext.Enter())
                 {
                     presenter = createPresenter(view) ??
-                        throw new InvalidOperationException($"Presenter factory for {id} returned null.");
+                        throw new InvalidOperationException($"Presenter factory for {key} returned null.");
                     configurePresenter?.Invoke(presenter);
                 }
                 await presenter.InitializeAsync(cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
                 ThrowIfShuttingDown();
-                return (presenter, new OpenView(id, view, presenter, presenter.DisposeAsync));
+                return (presenter, new OpenView(key, view, presenter, presenter.DisposeAsync));
             }
             catch (Exception createException)
             {
                 try
                 {
-                    await ReleaseAsync(new OpenView(id, view, presenter,
+                    await ReleaseAsync(new OpenView(key, view, presenter,
                         presenter == null ? null : presenter.DisposeAsync));
                 }
                 catch (Exception cleanupException)
@@ -682,15 +677,15 @@ namespace MXEngine
 
         private sealed class OpenView
         {
-            public readonly int Id;
+            public readonly string Key;
             public readonly Component View;
             public readonly object Presenter;
             public readonly Func<UniTask> DisposePresenter;
             public bool DisposeAttempted;
 
-            public OpenView(int id, Component view, object presenter, Func<UniTask> disposePresenter)
+            public OpenView(string key, Component view, object presenter, Func<UniTask> disposePresenter)
             {
-                Id = id;
+                Key = key;
                 View = view;
                 Presenter = presenter;
                 DisposePresenter = disposePresenter;

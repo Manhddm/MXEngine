@@ -53,7 +53,6 @@ namespace MXEngine.Samples
 
         private void Awake()
         {
-            // _navigation = new NavigationService(new AddressableViewLoader(), catalog, uiRoot);
             lobbyButton.onClick.AddListener(OnLobby);
             gameplayButton.onClick.AddListener(OnGameplay);
             settingsButton.onClick.AddListener(OnSettings);
@@ -107,17 +106,17 @@ namespace MXEngine.Samples
                 {
                     case DemoAction.Lobby:
                         await _navigation.ShowScreenAsync<NavigationDemoScreenPresenter, NavigationDemoView,
-                            NavigationDemoState>(GameViewId.Lobby, view => new NavigationDemoScreenPresenter(view),
+                            NavigationDemoState>(GameViewKey.Lobby, view => new NavigationDemoScreenPresenter(view),
                             cancellationToken: cancellationToken);
                         break;
                     case DemoAction.Gameplay:
                         await _navigation.ShowScreenAsync<NavigationDemoScreenPresenter, NavigationDemoView,
-                            NavigationDemoState>(GameViewId.Gameplay, view => new NavigationDemoScreenPresenter(view),
+                            NavigationDemoState>(GameViewKey.Gameplay, view => new NavigationDemoScreenPresenter(view),
                             cancellationToken: cancellationToken);
                         break;
                     case DemoAction.Settings:
                         await _navigation.ShowModalAsync<NavigationDemoModalPresenter, NavigationDemoView,
-                            NavigationDemoState>(GameViewId.Settings, view => new NavigationDemoModalPresenter(view),
+                            NavigationDemoState>(GameViewKey.Settings, view => new NavigationDemoModalPresenter(view),
                             cancellationToken: cancellationToken);
                         break;
                     case DemoAction.Back:
@@ -131,9 +130,9 @@ namespace MXEngine.Samples
                         break;
                     case DemoAction.Loading:
                         if (_loadingVisible)
-                            await _navigation.HideOverlayAsync(GameViewId.Loading, cancellationToken);
+                            await _navigation.HideOverlayAsync(GameViewKey.Loading, cancellationToken);
                         else
-                            await _navigation.ShowOverlayAsync<RectTransform>(GameViewId.Loading, cancellationToken);
+                            await _navigation.ShowOverlayAsync<RectTransform>(GameViewKey.Loading, cancellationToken);
                         _loadingVisible = !_loadingVisible;
                         break;
                 }

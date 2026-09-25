@@ -1,23 +1,22 @@
 # MXEngine UI
 
-MXEngine quản lý vòng đời UI prefab trong Unity: chọn prefab từ catalog, tạo View qua Addressables, bind State, khởi tạo Presenter, điều hướng Screen/Modal/Overlay và giải phóng instance. Đây là nền UI nhỏ, không chứa dữ liệu gameplay hay hệ thống scene routing.
+MXEngine quản lý vòng đời UI prefab trong Unity: tải View theo key Addressables, bind State, khởi tạo Presenter, điều hướng Screen/Modal/Overlay và giải phóng instance. Đây là nền UI nhỏ, không chứa dữ liệu gameplay hay hệ thống scene routing.
 
 ## Cấu trúc và ranh giới assembly
 
 | Assembly | Nội dung | Phụ thuộc |
 | --- | --- | --- |
-| `MXEngine` | `NavigationService`, `UIRoot`, MVP, loader, catalog | UniTask, Addressables |
-| `MXEngine.Samples` | Demo điều hướng và `GameViewId` | `MXEngine`, uGUI |
-| `MXEngine.Samples.Editor` | Builder tạo scene/prefab/catalog | `MXEngine.Samples`, UnityEditor |
+| `MXEngine` | `NavigationService`, `UIRoot`, MVP, loader | UniTask, Addressables |
+| `MXEngine.Samples` | Demo điều hướng và `GameViewKey` | `MXEngine`, uGUI |
+| `MXEngine.Samples.Editor` | Builder tạo scene/prefab và đăng ký Addressables | `MXEngine.Samples`, UnityEditor |
 | `MXEngine.Tests` | Test lifecycle/navigation với `FakeViewLoader` | `MXEngine`, NUnit |
 | `MXEngine.Samples.Tests` | Test ba instance của Settings prefab Addressable | `MXEngine.Samples`, Addressables |
 
-`MXEngine` dùng `int` làm ID. Mỗi game tự định nghĩa hằng số ID; sample đặt chúng trong [GameViewId.cs](Assets/MXEngine/Samples/NavigationDemo/GameViewId.cs). Các giá trị 0–5 của sample được giữ nguyên để catalog hiện có tiếp tục đọc được. `ViewCatalog.Get` báo lỗi nếu trùng ID; mỗi `ViewEntry` chứa ID, `ViewLayer` và `AssetReferenceGameObject`.
+Mỗi game truyền thẳng key Addressables vào API điều hướng. Sample đặt các hằng số trong [GameViewKey.cs](Assets/MXEngine/Samples/NavigationDemo/GameViewKey.cs).
 
 ```mermaid
 flowchart LR
     Game[Game] --> Nav[NavigationService]
-    Nav --> Catalog[ViewCatalog]
     Nav --> Root[UIRoot]
     Nav --> Loader[IViewLoader]
     Loader --> Addressables[Addressables]
@@ -31,9 +30,9 @@ Source chính: [NavigationService.cs](Assets/MXEngine/NavigationService.cs), [Pr
 
 ## Vòng đời khi mở View
 
-1. Game gọi `ShowScreenAsync`, `ShowModalAsync` hoặc `ShowOverlayAsync` với ID, factory Presenter và tùy chọn `CancellationToken`.
-2. Service kiểm tra layer/reference trong catalog và chọn `ScreenRoot`, `ModalRoot` hoặc `OverlayRoot` từ `UIRoot`.
-3. Loader gọi `Addressables.InstantiateAsync(reference, stage.transform)`. Stage inactive giữ prefab chưa hiển thị trong lúc tải. Mỗi instance có handle riêng trong registry `Component → AsyncOperationHandle<GameObject>`.
+1. Game gọi `ShowScreenAsync`, `ShowModalAsync` hoặc `ShowOverlayAsync` với key Addressables, factory Presenter và tùy chọn `CancellationToken`.
+2. Service chọn `ScreenRoot`, `ModalRoot` hoặc `OverlayRoot` từ `UIRoot` theo API được gọi.
+3. Loader gọi `Addressables.InstantiateAsync(key, stage.transform)`. Stage inactive giữ prefab chưa hiển thị trong lúc tải. Mỗi instance có handle riêng trong registry `Component → AsyncOperationHandle<GameObject>`.
 4. Loader chuyển instance sang root đang active, bật rồi tắt đồng bộ để Unity chạy `Awake`. `OnEnable` có thể chạy trong bước này trước Bind; View không được đọc `State` trong `OnEnable` nếu chưa kiểm tra null. Không có frame hiển thị được yield ở bước này.
 5. Service tạo Presenter; `Presenter.InitializeAsync(token)` tạo `TState`, gọi `View.BindAsync(state, token)`, sau đó `OnInitializeAsync(state, token)`.
 6. Sau khi init hoàn tất, service bật View và commit vào stack/dictionary. Thứ tự được bảo đảm là `Awake → Bind → Presenter init → activation cuối`; `OnEnable` có thể chạy sớm ở bước 4.
@@ -54,11 +53,11 @@ Presenter do `NavigationService` trả về thuộc quyền sở hữu của ser
 
 | API | Hành vi |
 | --- | --- |
-| `ShowScreenAsync(..., stack: true)` | Mở Screen mới, ẩn top cũ nhưng giữ View/State/Presenter; cùng ID ở top trả Presenter hiện có; ID nằm sâu được đưa lên top. |
+| `ShowScreenAsync(..., stack: true)` | Mở Screen mới, ẩn top cũ nhưng giữ View/State/Presenter; cùng key ở top trả Presenter hiện có; key nằm sâu được đưa lên top. |
 | `BackToPreviousScreenAsync` | Cần ít nhất hai Screen; pop/release top rồi bật Screen trước. |
 | `ShowScreenAsync(..., stack: false)` | Tạo Screen mới trước; khi commit xong, dọn toàn bộ Screen cũ. Modal/Overlay vẫn tồn tại. |
-| `ShowModalAsync` | Mỗi lần gọi tạo instance mới, kể cả cùng ID. `CloseModalAsync` pop top; `CloseAllModalsAsync` dọn hết. |
-| `ShowOverlayAsync` | Mỗi ID chỉ có một Overlay; có overload với hoặc không có Presenter. `HideOverlayAsync(id)` đóng. |
+| `ShowModalAsync` | Mỗi lần gọi tạo instance mới, kể cả cùng key. `CloseModalAsync` pop top; `CloseAllModalsAsync` dọn hết. |
+| `ShowOverlayAsync` | Mỗi key chỉ có một Overlay; có overload với hoặc không có Presenter. `HideOverlayAsync(key)` đóng. |
 | `ShutdownAsync` | Ngừng nhận request, hủy request đang chờ và dọn Screen/Modal/Overlay do service sở hữu. Gọi khi owner bị hủy. |
 
 Screen/Modal dùng `_gate`; Overlay dùng `_overlayGate`. Request bên ngoài đến trong lúc Presenter đang `await` được chờ semaphore. Nếu View/Presenter lifecycle callback gọi ngược navigation cùng lúc, `LifecycleContext` ném `InvalidOperationException` ngay để tránh deadlock. Để điều hướng tiếp, phát lệnh từ UI event sau khi hook đã hoàn tất.
@@ -108,10 +107,10 @@ public sealed class MenuPresenter : ScreenPresenter<MenuView, MenuState>
     }
 }
 
-// ID do game định nghĩa. Catalog cần entry ID này với layer Screen.
-const int MenuId = 10;
+// Key của prefab đã đăng ký trong Addressables.
+const string MenuKey = "UI/Menu";
 await navigation.ShowScreenAsync<MenuPresenter, MenuView, MenuState>(
-    MenuId, view => new MenuPresenter(view), cancellationToken: token);
+    MenuKey, view => new MenuPresenter(view), cancellationToken: token);
 ```
 
 `OnBindAsync` chạy trước `OnInitializeAsync`, nên Presenter gọi `View.Render(state)` sau khi cập nhật `Title`. `ViewState` không tự phát sự kiện khi field đổi.
@@ -120,4 +119,4 @@ await navigation.ShowScreenAsync<MenuPresenter, MenuView, MenuState>(
 
 [TestSupport.cs](Assets/MXEngine/Tests/TestSupport.cs) dùng `FakeViewLoader`; các test lifecycle, navigation, concurrency, cancellation và failure recovery nằm trong `Assets/MXEngine/Tests/`. Test Addressables thật của cùng một Settings prefab nằm ở [AddressablesIntegrationTests.cs](Assets/MXEngine/Samples/NavigationDemo/Tests/AddressablesIntegrationTests.cs). Chạy test trong Unity Test Runner ở Play Mode. Việc source biên dịch thành công không chứng minh test hoặc demo Play Mode đã chạy thành công.
 
-MXEngine hiện vẫn gắn với `AssetReferenceGameObject` ở loader/catalog và dùng `int` ID không có type safety mạnh. Nó không có reactive binding, DI container, transition, pooling hoặc scene router. `IDisposable.Dispose()` của Presenter là fire and forget; nơi sở hữu Addressable View nên gọi `await DisposeAsync()` hoặc để `NavigationService` quản lý.
+MXEngine không có reactive binding, DI container, transition, pooling hoặc scene router. `IDisposable.Dispose()` của Presenter là fire and forget; nơi sở hữu Addressable View nên gọi `await DisposeAsync()` hoặc để `NavigationService` quản lý.

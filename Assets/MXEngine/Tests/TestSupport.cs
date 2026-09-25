@@ -8,7 +8,6 @@ using Cysharp.Threading.Tasks;
 using MXEngine.MVP;
 using NUnit.Framework;
 using UnityEngine;
-using UnityEngine.AddressableAssets;
 using UnityEngine.UI;
 
 namespace MXEngine.Tests
@@ -50,11 +49,13 @@ namespace MXEngine.Tests
         internal bool FailLoad;
         internal bool FailRelease;
         internal int ReleaseCalls;
+        internal string LastKey;
         internal Func<CancellationToken, Task> LoadHook;
         internal Action<TestView> Configure;
-        public async UniTask<T> LoadAsync<T>(AssetReferenceGameObject reference, Transform parent,
+        public async UniTask<T> LoadAsync<T>(string key, Transform parent,
             CancellationToken token = default) where T : Component
         {
+            LastKey = key;
             token.ThrowIfCancellationRequested();
             if (FailLoad) throw new InvalidOperationException("load");
             if (LoadHook != null) await LoadHook(token);
@@ -82,11 +83,10 @@ namespace MXEngine.Tests
 
     public abstract class NavigationTestFixture
     {
-        protected const int A = 0, B = 1, C = 2, Modal = 3, Overlay = 4;
+        protected const string A = "A", B = "B", C = "C", Modal = "Modal", Overlay = "Overlay";
         internal FakeViewLoader Loader;
         protected NavigationService Navigation;
         private GameObject _root;
-        private ViewCatalog _catalog;
         protected readonly List<Exception> Diagnostics = new();
 
         [SetUp]
@@ -102,15 +102,8 @@ namespace MXEngine.Tests
                 typeof(UIRoot).GetField("<" + name + ">k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)
                     .SetValue(ui, child);
             }
-            _catalog = ScriptableObject.CreateInstance<ViewCatalog>();
-            var entries = new List<ViewEntry>();
-            for (var id = A; id <= Overlay; id++)
-                entries.Add(new ViewEntry { Id = id, Layer = id == Modal ? ViewLayer.Modal :
-                    id == Overlay ? ViewLayer.Overlay : ViewLayer.Screen,
-                    Reference = new AssetReferenceGameObject("11111111111111111111111111111111") });
-            typeof(ViewCatalog).GetField("entries", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(_catalog, entries);
             Loader = new FakeViewLoader();
-            Navigation = new NavigationService(Loader, _catalog, ui);
+            Navigation = new NavigationService(Loader, ui);
             Navigation.CleanupFailed += Diagnostics.Add;
         }
 
@@ -122,12 +115,11 @@ namespace MXEngine.Tests
             foreach (var view in Loader.Created)
                 if (view != null) UnityEngine.Object.DestroyImmediate(view.gameObject);
             UnityEngine.Object.DestroyImmediate(_root);
-            UnityEngine.Object.DestroyImmediate(_catalog);
         }
 
-        protected UniTask<TestScreen> Screen(int id = A, Action<TestScreen> configure = null,
+        protected UniTask<TestScreen> Screen(string key = A, Action<TestScreen> configure = null,
             CancellationToken token = default, bool stack = true) =>
-            Navigation.ShowScreenAsync<TestScreen, TestView, TestState>(id, v => new TestScreen(v), stack, configure, token);
+            Navigation.ShowScreenAsync<TestScreen, TestView, TestState>(key, v => new TestScreen(v), stack, configure, token);
         protected UniTask<TestModal> OpenModal(CancellationToken token = default) =>
             Navigation.ShowModalAsync<TestModal, TestView, TestState>(Modal, v => new TestModal(v), cancellationToken: token);
         protected UniTask<TestScreen> OpenOverlay() =>
