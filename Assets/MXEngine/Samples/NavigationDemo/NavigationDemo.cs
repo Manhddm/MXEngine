@@ -27,6 +27,14 @@ namespace MXEngine.Samples
 
     public sealed class NavigationDemo : MonoBehaviour
     {
+        // This legacy demo intentionally reuses NavigationDemoView on several prefabs,
+        // so it supplies explicit addresses. New views normally omit address and use
+        // the View type name automatically.
+        private const string LobbyAddress = "NavigationDemo/Lobby";
+        private const string GameplayAddress = "NavigationDemo/Gameplay";
+        private const string SettingsAddress = "NavigationDemo/Settings";
+        private const string LoadingAddress = "NavigationDemo/Loading";
+
         [SerializeField] private Button lobbyButton;
         [SerializeField] private Button gameplayButton;
         [SerializeField] private Button settingsButton;
@@ -53,7 +61,6 @@ namespace MXEngine.Samples
 
         private void Awake()
         {
-            // _navigation = new NavigationService(new AddressableViewLoader(), catalog, uiRoot);
             lobbyButton.onClick.AddListener(OnLobby);
             gameplayButton.onClick.AddListener(OnGameplay);
             settingsButton.onClick.AddListener(OnSettings);
@@ -78,7 +85,6 @@ namespace MXEngine.Samples
             closeModalButton.onClick.RemoveListener(OnCloseModal);
             closeAllModalsButton.onClick.RemoveListener(OnCloseAllModals);
             loadingButton.onClick.RemoveListener(OnLoading);
-            _navigation?.ShutdownAsync().Forget(Debug.LogException);
         }
 
         private void OnLobby() => ExecuteAsync(DemoAction.Lobby).Forget();
@@ -88,6 +94,7 @@ namespace MXEngine.Samples
             SceneManager.LoadScene("Gameplay", LoadSceneMode.Additive);
             ExecuteAsync(DemoAction.Gameplay).Forget();
         }
+
         private void OnSettings() => ExecuteAsync(DemoAction.Settings).Forget();
         private void OnBack() => ExecuteAsync(DemoAction.Back).Forget();
         private void OnCloseModal() => ExecuteAsync(DemoAction.CloseModal).Forget();
@@ -107,43 +114,58 @@ namespace MXEngine.Samples
                 {
                     case DemoAction.Lobby:
                         await _navigation.ShowScreenAsync<NavigationDemoScreenPresenter, NavigationDemoView,
-                            NavigationDemoState>(GameViewId.Lobby, view => new NavigationDemoScreenPresenter(view),
-                            cancellationToken: cancellationToken);
+                            NavigationDemoState>(
+                            view => new NavigationDemoScreenPresenter(view),
+                            cancellationToken: cancellationToken,
+                            address: LobbyAddress);
                         break;
+
                     case DemoAction.Gameplay:
                         await _navigation.ShowScreenAsync<NavigationDemoScreenPresenter, NavigationDemoView,
-                            NavigationDemoState>(GameViewId.Gameplay, view => new NavigationDemoScreenPresenter(view),
-                            cancellationToken: cancellationToken);
+                            NavigationDemoState>(
+                            view => new NavigationDemoScreenPresenter(view),
+                            cancellationToken: cancellationToken,
+                            address: GameplayAddress);
                         break;
+
                     case DemoAction.Settings:
                         await _navigation.ShowModalAsync<NavigationDemoModalPresenter, NavigationDemoView,
-                            NavigationDemoState>(GameViewId.Settings, view => new NavigationDemoModalPresenter(view),
-                            cancellationToken: cancellationToken);
+                            NavigationDemoState>(
+                            view => new NavigationDemoModalPresenter(view),
+                            cancellationToken: cancellationToken,
+                            address: SettingsAddress);
                         break;
+
                     case DemoAction.Back:
                         await _navigation.BackToPreviousScreenAsync(cancellationToken);
                         break;
+
                     case DemoAction.CloseModal:
                         await _navigation.CloseModalAsync(cancellationToken);
                         break;
+
                     case DemoAction.CloseAllModals:
                         await _navigation.CloseAllModalsAsync(cancellationToken);
                         break;
+
                     case DemoAction.Loading:
                         if (_loadingVisible)
-                            await _navigation.HideOverlayAsync(GameViewId.Loading, cancellationToken);
+                            await _navigation.HideOverlayAsync(LoadingAddress, cancellationToken);
                         else
-                            await _navigation.ShowOverlayAsync<RectTransform>(GameViewId.Loading, cancellationToken);
+                            await _navigation.ShowOverlayAsync<RectTransform>(
+                                cancellationToken,
+                                LoadingAddress);
                         _loadingVisible = !_loadingVisible;
                         break;
                 }
 
                 if (statusText != null)
-                    statusText.text = $"Screens: {_navigation.ScreenCount}    Modals: {_navigation.ModalCount}    Loading: {_loadingVisible}";
+                    statusText.text =
+                        $"Screens: {_navigation.ScreenCount}    Modals: {_navigation.ModalCount}    Loading: {_loadingVisible}";
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                // Scene teardown owns navigation cleanup.
+                // Scene teardown cancels this demo's request. GameController owns NavigationService.
             }
             catch (Exception exception)
             {
