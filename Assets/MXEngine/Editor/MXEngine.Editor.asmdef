@@ -1,0 +1,1 @@
+{"name":"MXEngine.Editor","rootNamespace":"MXEngine.Editor","references":["MXEngine","Unity.Addressables.Editor"],"includePlatforms":["Editor"],"autoReferenced":true}
