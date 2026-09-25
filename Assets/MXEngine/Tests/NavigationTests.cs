@@ -122,9 +122,9 @@ namespace MXEngine.Tests
             var overlay = await OpenOverlay();
             await Fails<InvalidOperationException>(() => OpenOverlay().AsTask());
             Assert.AreEqual(1, Navigation.OverlayCount);
-            Assert.IsTrue(await Navigation.HideOverlayAsync(Overlay));
+            Assert.IsTrue(await Navigation.HideOverlayAsync("Test/Overlay"));
             Assert.AreEqual(1, overlay.Disposals);
-            Assert.IsFalse(await Navigation.HideOverlayAsync(Overlay));
+            Assert.IsFalse(await Navigation.HideOverlayAsync("Test/Overlay"));
             await AssertEmpty();
         });
 
@@ -134,7 +134,7 @@ namespace MXEngine.Tests
             await OpenOverlay();
             Loader.FailRelease = true;
             Assert.IsTrue(await Navigation.CloseModalAsync());
-            Assert.IsTrue(await Navigation.HideOverlayAsync(Overlay));
+            Assert.IsTrue(await Navigation.HideOverlayAsync("Test/Overlay"));
             Assert.AreEqual(0, Navigation.ModalCount);
             Assert.AreEqual(0, Navigation.OverlayCount);
             Assert.AreEqual(2, Navigation.PendingReleaseCount);
@@ -145,9 +145,9 @@ namespace MXEngine.Tests
 
         [UnityTest] public IEnumerator ComponentOnlyOverlayIsVisible() => Run(async () =>
         {
-            var view = await Navigation.ShowOverlayAsync<TestView>(Overlay);
+            var view = await Navigation.ShowOverlayAsync<TestView>(address: "Test/ComponentOverlay");
             Assert.IsTrue(view.gameObject.activeSelf);
-            await Navigation.HideOverlayAsync(Overlay);
+            await Navigation.HideOverlayAsync("Test/ComponentOverlay");
             await AssertEmpty();
         });
 
