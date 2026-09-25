@@ -1,12 +1,9 @@
 using System;
-using System.Collections.Generic;
-using System.Reflection;
 using MXEngine.MVP;
 using UnityEditor;
 using UnityEditor.AddressableAssets;
 using UnityEditor.SceneManagement;
 using UnityEngine;
-using UnityEngine.AddressableAssets;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem.UI;
 using UnityEngine.UI;
@@ -25,17 +22,35 @@ namespace MXEngine.Samples.Editor
         {
             EnsureFolder(PrefabPath);
 
-            var lobby = CreateScreenPrefab("LobbyScreen", "LOBBY SCREEN", "Press Gameplay to push a second screen.",
+            var lobby = CreateScreenPrefab(
+                "LobbyScreen",
+                "LOBBY SCREEN",
+                "Press Gameplay to push a second screen.",
                 new Color(0.10f, 0.18f, 0.27f));
-            var gameplay = CreateScreenPrefab("GameplayScreen", "GAMEPLAY SCREEN", "Press Back to restore Lobby.",
+            var gameplay = CreateScreenPrefab(
+                "GameplayScreen",
+                "GAMEPLAY SCREEN",
+                "Press Back to restore Lobby.",
                 new Color(0.12f, 0.25f, 0.20f));
             var settings = CreateModalPrefab();
             var loading = CreateLoadingPrefab();
 
-            var catalog = CreateCatalog(lobby, gameplay, settings, loading);
+            Register(lobby, "NavigationDemo/Lobby");
+            Register(gameplay, "NavigationDemo/Gameplay");
+            Register(settings, "NavigationDemo/Settings");
+            Register(loading, "NavigationDemo/Loading");
+
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-            var canvasObject = new GameObject("Navigation Demo Canvas", typeof(RectTransform), typeof(Canvas),
-                typeof(CanvasScaler), typeof(GraphicRaycaster), typeof(UIRoot), typeof(NavigationDemo));
+            var canvasObject = new GameObject(
+                "Navigation Demo Canvas",
+                typeof(RectTransform),
+                typeof(Canvas),
+                typeof(CanvasScaler),
+                typeof(GraphicRaycaster),
+                typeof(UIRoot),
+                typeof(GameController),
+                typeof(NavigationDemo));
+
             var canvas = canvasObject.GetComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             var scaler = canvasObject.GetComponent<CanvasScaler>();
@@ -55,14 +70,19 @@ namespace MXEngine.Samples.Editor
             rootProperties.FindProperty("<OverlayRoot>k__BackingField").objectReferenceValue = overlayRoot;
             rootProperties.ApplyModifiedPropertiesWithoutUndo();
 
+            var controller = canvasObject.GetComponent<GameController>();
+            var controllerProperties = new SerializedObject(controller);
+            controllerProperties.FindProperty("canvas").objectReferenceValue = canvas;
+            controllerProperties.FindProperty("uiRoot").objectReferenceValue = uiRoot;
+            controllerProperties.ApplyModifiedPropertiesWithoutUndo();
+
             var header = CreateFullStretch("Status Bar", canvasTransform);
             header.anchorMin = new Vector2(0, 1);
             header.anchorMax = Vector2.one;
             header.pivot = new Vector2(0.5f, 1);
             header.sizeDelta = new Vector2(0, 72);
             header.anchoredPosition = Vector2.zero;
-            var headerImage = header.gameObject.AddComponent<Image>();
-            headerImage.color = new Color(0.02f, 0.04f, 0.07f, 0.86f);
+            header.gameObject.AddComponent<Image>().color = new Color(0.02f, 0.04f, 0.07f, 0.86f);
             var status = CreateText("Status", header, "Starting...", 30, Color.white);
             SetFullStretch(status.rectTransform);
 
@@ -72,8 +92,7 @@ namespace MXEngine.Samples.Editor
             toolbar.pivot = new Vector2(0.5f, 0);
             toolbar.sizeDelta = new Vector2(0, 120);
             toolbar.anchoredPosition = Vector2.zero;
-            var toolbarImage = toolbar.gameObject.AddComponent<Image>();
-            toolbarImage.color = new Color(0.02f, 0.04f, 0.07f, 0.96f);
+            toolbar.gameObject.AddComponent<Image>().color = new Color(0.02f, 0.04f, 0.07f, 0.96f);
             var layout = toolbar.gameObject.AddComponent<HorizontalLayoutGroup>();
             layout.padding = new RectOffset(20, 20, 18, 18);
             layout.spacing = 14;
@@ -96,8 +115,6 @@ namespace MXEngine.Samples.Editor
 
             var demo = canvasObject.GetComponent<NavigationDemo>();
             var demoProperties = new SerializedObject(demo);
-            demoProperties.FindProperty("uiRoot").objectReferenceValue = uiRoot;
-            demoProperties.FindProperty("catalog").objectReferenceValue = catalog;
             demoProperties.FindProperty("lobbyButton").objectReferenceValue = buttons[0];
             demoProperties.FindProperty("gameplayButton").objectReferenceValue = buttons[1];
             demoProperties.FindProperty("settingsButton").objectReferenceValue = buttons[2];
@@ -108,7 +125,9 @@ namespace MXEngine.Samples.Editor
             demoProperties.FindProperty("statusText").objectReferenceValue = status;
             demoProperties.ApplyModifiedPropertiesWithoutUndo();
 
-            var eventSystemObject = new GameObject("EventSystem", typeof(EventSystem),
+            var eventSystemObject = new GameObject(
+                "EventSystem",
+                typeof(EventSystem),
                 typeof(InputSystemUIInputModule));
             eventSystemObject.GetComponent<InputSystemUIInputModule>().AssignDefaultActions();
 
@@ -124,10 +143,15 @@ namespace MXEngine.Samples.Editor
             SetFullStretch(root);
             root.gameObject.AddComponent<Image>().color = color;
             root.gameObject.AddComponent<NavigationDemoView>();
+
             var titleText = CreateText("Title", root, title, 86, Color.white);
             titleText.rectTransform.sizeDelta = new Vector2(1600, 170);
             titleText.rectTransform.anchoredPosition = new Vector2(0, 110);
-            var descriptionText = CreateText("Description", root, description, 42,
+            var descriptionText = CreateText(
+                "Description",
+                root,
+                description,
+                42,
                 new Color(0.8f, 0.9f, 1f));
             descriptionText.rectTransform.sizeDelta = new Vector2(1600, 130);
             descriptionText.rectTransform.anchoredPosition = new Vector2(0, -35);
@@ -140,14 +164,19 @@ namespace MXEngine.Samples.Editor
             SetFullStretch(root);
             root.gameObject.AddComponent<Image>().color = new Color(0, 0, 0, 0.62f);
             root.gameObject.AddComponent<NavigationDemoView>();
+
             var panel = NewUIObject("Panel", root);
             panel.sizeDelta = new Vector2(820, 440);
             panel.gameObject.AddComponent<Image>().color = new Color(0.20f, 0.21f, 0.33f);
             var title = CreateText("Title", panel, "SETTINGS MODAL", 62, Color.white);
             title.rectTransform.sizeDelta = new Vector2(760, 120);
             title.rectTransform.anchoredPosition = new Vector2(0, 65);
-            var hint = CreateText("Hint", panel, "Open again to test the modal stack.\nUse Close Modal or Close All below.",
-                32, Color.white);
+            var hint = CreateText(
+                "Hint",
+                panel,
+                "Open again to test the modal stack.\nUse Close Modal or Close All below.",
+                32,
+                Color.white);
             hint.rectTransform.sizeDelta = new Vector2(740, 180);
             hint.rectTransform.anchoredPosition = new Vector2(0, -55);
             return SavePrefab(root.gameObject, "SettingsModal");
@@ -163,45 +192,16 @@ namespace MXEngine.Samples.Editor
             return SavePrefab(root.gameObject, "LoadingOverlay");
         }
 
-        private static ViewCatalog CreateCatalog(string lobby, string gameplay, string settings, string loading)
-        {
-            var path = BasePath + "/NavigationDemoCatalog.asset";
-            var catalog = AssetDatabase.LoadAssetAtPath<ViewCatalog>(path);
-            if (catalog == null)
-            {
-                catalog = ScriptableObject.CreateInstance<ViewCatalog>();
-                AssetDatabase.CreateAsset(catalog, path);
-            }
-
-            var entries = new List<ViewEntry>
-            {
-                Register(GameViewId.Lobby, ViewLayer.Screen, lobby),
-                Register(GameViewId.Gameplay, ViewLayer.Screen, gameplay),
-                Register(GameViewId.Settings, ViewLayer.Modal, settings),
-                Register(GameViewId.Loading, ViewLayer.Overlay, loading)
-            };
-            typeof(ViewCatalog).GetField("entries", BindingFlags.Instance | BindingFlags.NonPublic)
-                ?.SetValue(catalog, entries);
-            EditorUtility.SetDirty(catalog);
-            return catalog;
-        }
-
-        private static ViewEntry Register(int id, ViewLayer layer, string path)
+        private static void Register(string path, string address)
         {
             var settings = AddressableAssetSettingsDefaultObject.GetSettings(true);
             if (settings == null || settings.DefaultGroup == null)
                 throw new InvalidOperationException("Addressables needs a default group.");
 
             var guid = AssetDatabase.AssetPathToGUID(path);
-            var addressableEntry = settings.CreateOrMoveEntry(guid, settings.DefaultGroup);
-            addressableEntry.address = "NavigationDemo/" + id;
+            var entry = settings.CreateOrMoveEntry(guid, settings.DefaultGroup);
+            entry.SetAddress(address, false);
             EditorUtility.SetDirty(settings);
-            return new ViewEntry
-            {
-                Id = id,
-                Layer = layer,
-                Reference = new AssetReferenceGameObject(guid)
-            };
         }
 
         private static string SavePrefab(GameObject root, string name)
@@ -268,6 +268,7 @@ namespace MXEngine.Samples.Editor
         {
             if (AssetDatabase.IsValidFolder(path))
                 return;
+
             var parent = path.Substring(0, path.LastIndexOf('/'));
             EnsureFolder(parent);
             AssetDatabase.CreateFolder(parent, path.Substring(path.LastIndexOf('/') + 1));
