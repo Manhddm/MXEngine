@@ -6,17 +6,26 @@ namespace MXEngine.Samples
     public class GameController : MonoBehaviour
     {
         public static GameController Instance { get; private set; }
+
         [SerializeField] private Canvas canvas;
-        [SerializeField] private ViewCatalog viewCatalog;
         [SerializeField] private UIRoot uiRoot;
+
         private NavigationService _navigation;
+
         private Canvas Canvas => canvas;
         public NavigationService Navigation => _navigation;
+
         private void Awake()
         {
-            if (Instance == null) Instance = this;
+            if (Instance != null && Instance != this)
+            {
+                Destroy(gameObject);
+                return;
+            }
+
+            Instance = this;
             DontDestroyOnLoad(gameObject);
-            _navigation = new NavigationService(new AddressableViewLoader(), viewCatalog, uiRoot);
+            _navigation = new NavigationService(new AddressableViewLoader(), uiRoot);
         }
     }
 }
