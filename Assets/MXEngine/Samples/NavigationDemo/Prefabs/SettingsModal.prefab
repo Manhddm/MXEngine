@@ -250,6 +250,7 @@ GameObject:
   - component: {fileID: 6575735038647313597}
   - component: {fileID: 3389469779812400071}
   - component: {fileID: 1677003325263676743}
+  - component: {fileID: 1880800742860896060}
   m_Layer: 0
   m_Name: SettingsModal
   m_TagString: Untagged
@@ -327,3 +328,116 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a833ab6446eb60c4e8c0755575d57313, type: 3}
   m_Name: 
   m_EditorClassIdentifier: MXEngine.Samples::MXEngine.Samples.NavigationDemoView
+--- !u!114 &1880800742860896060
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7424582113214786379}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9cc6819e64e4c44beb63ea2ef45e1a6d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: LitMotion.Animation::LitMotion.Animation.LitMotionAnimation
+  autoPlayMode: 1
+  animationMode: 0
+  components:
+  - rid: 1842182854745522176
+  - rid: 1842182854745522178
+  playOnAwake: 1
+  version: 1
+  references:
+    version: 2
+    RefIds:
+    - rid: 1842182854745522176
+      type: {class: TransformPositionAnimation, ns: LitMotion.Animation.Components, asm: LitMotion.Animation}
+      data:
+        displayName: PositionIn
+        enabled: 1
+        target: {fileID: 7853648185176796322}
+        settings:
+          startValue: {x: 0, y: 3000, z: 0}
+          endValue: {x: 0, y: 0, z: 0}
+          duration: 0.5
+          ease: 26
+          customEaseCurve:
+            serializedVersion: 2
+            m_Curve:
+            - serializedVersion: 3
+              time: 0
+              value: 0
+              inSlope: 0
+              outSlope: 0
+              tangentMode: 0
+              weightedMode: 0
+              inWeight: 0
+              outWeight: 0
+            - serializedVersion: 3
+              time: 1
+              value: 1
+              inSlope: 0
+              outSlope: 0
+              tangentMode: 0
+              weightedMode: 0
+              inWeight: 0
+              outWeight: 0
+            m_PreInfinity: 2
+            m_PostInfinity: 2
+            m_RotationOrder: 4
+          delay: 0
+          delayType: 0
+          loops: 1
+          loopType: 0
+          cancelOnError: 0
+          skipValuesDuringDelay: 0
+          immediateBind: 1
+          schedulerType: 0
+          additionalSettings: 1
+        relative: 1
+        useWorldSpace: 0
+    - rid: 1842182854745522178
+      type: {class: TransformScaleAnimation, ns: LitMotion.Animation.Components, asm: LitMotion.Animation}
+      data:
+        displayName: Scale
+        enabled: 1
+        target: {fileID: 7853648185176796322}
+        settings:
+          startValue: {x: 0.4, y: 0.4, z: 0.4}
+          endValue: {x: 1, y: 1, z: 1}
+          duration: 1
+          ease: 29
+          customEaseCurve:
+            serializedVersion: 2
+            m_Curve:
+            - serializedVersion: 3
+              time: 0
+              value: 0
+              inSlope: 0
+              outSlope: 0
+              tangentMode: 0
+              weightedMode: 0
+              inWeight: 0
+              outWeight: 0
+            - serializedVersion: 3
+              time: 1
+              value: 1
+              inSlope: 0
+              outSlope: 0
+              tangentMode: 0
+              weightedMode: 0
+              inWeight: 0
+              outWeight: 0
+            m_PreInfinity: 2
+            m_PostInfinity: 2
+            m_RotationOrder: 4
+          delay: 0
+          delayType: 0
+          loops: 1
+          loopType: 0
+          cancelOnError: 0
+          skipValuesDuringDelay: 0
+          immediateBind: 1
+          schedulerType: 0
+          additionalSettings: 1
+        relative: 0
