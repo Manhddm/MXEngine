@@ -1,12 +1,14 @@
-using System.Threading;
-using System.Threading.Tasks;
-using MXEngine.MVP;
+using UnityEngine;
 
 namespace MXEngine.Samples
 {
-    public sealed class NavigationDemoView : View<NavigationDemoState>
+    public sealed class NavigationDemoView : MonoBehaviour
     {
-        protected override Task OnBindAsync(NavigationDemoState state, CancellationToken cancellationToken)
-            => Task.CompletedTask;
+        [SerializeField] private GameObject content;
+
+        private void OnEnable()
+        {
+            if (content != null) content.SetActive(true);
+        }
     }
 }

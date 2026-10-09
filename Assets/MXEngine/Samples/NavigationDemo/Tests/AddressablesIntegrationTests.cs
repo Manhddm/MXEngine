@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
-using System.Threading.Tasks;
-using MXEngine.MVP;
+using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -31,7 +30,7 @@ namespace MXEngine.Samples.Tests
             finally { UnityEngine.Object.DestroyImmediate(root); }
         }
 
-        private static async Task VerifyAsync(AddressableViewLoader loader,
+        private static async UniTask VerifyAsync(AddressableViewLoader loader,
             string key, Transform parent)
         {
             NavigationDemoView first = null, second = null, third = null;

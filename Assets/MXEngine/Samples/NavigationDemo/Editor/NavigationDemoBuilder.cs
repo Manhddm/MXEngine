@@ -1,5 +1,4 @@
 using System;
-using MXEngine.MVP;
 using UnityEditor;
 using UnityEditor.AddressableAssets;
 using UnityEditor.SceneManagement;
@@ -163,6 +162,7 @@ namespace MXEngine.Samples.Editor
             var root = NewUIObject("LoadingOverlay", null);
             SetFullStretch(root);
             root.gameObject.AddComponent<Image>().color = new Color(0.02f, 0.04f, 0.12f, 0.78f);
+            root.gameObject.AddComponent<NavigationDemoView>();
             var label = CreateText("Label", root, "LOADING OVERLAY", 68, Color.white);
             label.rectTransform.sizeDelta = new Vector2(1500, 180);
             return SavePrefab(root.gameObject, "LoadingOverlay");

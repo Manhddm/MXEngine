@@ -1,30 +1,11 @@
 using System;
 using Cysharp.Threading.Tasks;
-using MXEngine.MVP;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 namespace MXEngine.Samples
 {
-    public sealed class NavigationDemoState : ViewState
-    {
-    }
-
-    public sealed class NavigationDemoScreenPresenter : ScreenPresenter<NavigationDemoView, NavigationDemoState>
-    {
-        public NavigationDemoScreenPresenter(NavigationDemoView view) : base(view)
-        {
-        }
-    }
-
-    public sealed class NavigationDemoModalPresenter : ModalPresenter<NavigationDemoView, NavigationDemoState>
-    {
-        public NavigationDemoModalPresenter(NavigationDemoView view) : base(view)
-        {
-        }
-    }
-
     public sealed class NavigationDemo : MonoBehaviour
     {
         [SerializeField] private Button lobbyButton;
@@ -105,18 +86,18 @@ namespace MXEngine.Samples
                 switch (action)
                 {
                     case DemoAction.Lobby:
-                        await _navigation.ShowScreenAsync<NavigationDemoScreenPresenter, NavigationDemoView,
-                            NavigationDemoState>(GameViewKey.Lobby, view => new NavigationDemoScreenPresenter(view),
+                        await _navigation.ShowScreenAsync<NavigationDemoView>(
+                            GameViewKey.Lobby,
                             cancellationToken: cancellationToken);
                         break;
                     case DemoAction.Gameplay:
-                        await _navigation.ShowScreenAsync<NavigationDemoScreenPresenter, NavigationDemoView,
-                            NavigationDemoState>(GameViewKey.Gameplay, view => new NavigationDemoScreenPresenter(view),
+                        await _navigation.ShowScreenAsync<NavigationDemoView>(
+                            GameViewKey.Gameplay,
                             cancellationToken: cancellationToken);
                         break;
                     case DemoAction.Settings:
-                        await _navigation.ShowModalAsync<NavigationDemoModalPresenter, NavigationDemoView,
-                            NavigationDemoState>(GameViewKey.Settings, view => new NavigationDemoModalPresenter(view),
+                        await _navigation.ShowModalAsync<NavigationDemoView>(
+                            GameViewKey.Settings,
                             cancellationToken: cancellationToken);
                         break;
                     case DemoAction.Back:
@@ -132,7 +113,7 @@ namespace MXEngine.Samples
                         if (_loadingVisible)
                             await _navigation.HideOverlayAsync(GameViewKey.Loading, cancellationToken);
                         else
-                            await _navigation.ShowOverlayAsync<RectTransform>(GameViewKey.Loading, cancellationToken);
+                            await _navigation.ShowOverlayAsync<NavigationDemoView>(GameViewKey.Loading, cancellationToken);
                         _loadingVisible = !_loadingVisible;
                         break;
                 }

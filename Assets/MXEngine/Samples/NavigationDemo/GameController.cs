@@ -1,4 +1,4 @@
-using MXEngine.MVP;
+using Cysharp.Threading.Tasks;
 using UnityEngine;
 
 namespace MXEngine.Samples
@@ -9,13 +9,17 @@ namespace MXEngine.Samples
         [SerializeField] private Canvas canvas;
         [SerializeField] private UIRoot uiRoot;
         private NavigationService _navigation;
-        private Canvas Canvas => canvas;
         public NavigationService Navigation => _navigation;
         private void Awake()
         {
             if (Instance == null) Instance = this;
             DontDestroyOnLoad(gameObject);
             _navigation = new NavigationService(new AddressableViewLoader(), uiRoot);
+        }
+
+        private void OnDestroy()
+        {
+            _navigation?.ShutdownAsync().Forget(Debug.LogException);
         }
     }
 }

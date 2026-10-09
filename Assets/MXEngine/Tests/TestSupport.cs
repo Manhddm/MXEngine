@@ -1,82 +1,51 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Reflection;
 using System.Threading;
-using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
-using MXEngine.MVP;
 using NUnit.Framework;
 using UnityEngine;
-using UnityEngine.UI;
 
 namespace MXEngine.Tests
 {
-    public sealed class TestScreen : ScreenPresenter<TestView, TestState>
+    public sealed class TestUi : MonoBehaviour
     {
-        public TestView TestView => View;
-        public TestState TestState => State;
-        public int Disposals;
-        public bool FailInitialize;
-        public bool FailDispose;
-        public Func<CancellationToken, Task> InitializeHook;
-        public Action DisposeHook;
-        public TestScreen(TestView view) : base(view) { }
-        protected override async Task OnInitializeAsync(TestState state, CancellationToken token)
-        {
-            if (FailInitialize) throw new InvalidOperationException("initialize");
-            if (InitializeHook != null) await InitializeHook(token);
-        }
-        protected override void OnDispose()
-        {
-            Disposals++;
-            DisposeHook?.Invoke();
-            if (FailDispose) throw new InvalidOperationException("presenter-dispose");
-        }
-    }
-
-    public sealed class TestModal : ModalPresenter<TestView, TestState>
-    {
-        public int Disposals;
-        public TestModal(TestView view) : base(view) { }
-        protected override void OnDispose() => Disposals++;
+        public int Enables;
+        public int Disables;
+        private void OnEnable() { Enables++; }
+        private void OnDisable() { Disables++; }
     }
 
     internal sealed class FakeViewLoader : IViewLoader
     {
-        internal readonly HashSet<Component> Owned = new();
-        internal readonly List<TestView> Created = new();
+        internal readonly List<Component> Created = new List<Component>();
+        internal readonly HashSet<Component> Owned = new HashSet<Component>();
         internal bool FailLoad;
         internal bool FailRelease;
         internal int ReleaseCalls;
-        internal string LastKey;
-        internal Func<CancellationToken, Task> LoadHook;
-        internal Action<TestView> Configure;
+        internal Func<CancellationToken, UniTask> LoadHook;
         public async UniTask<T> LoadAsync<T>(string key, Transform parent,
-            CancellationToken token = default) where T : Component
+            CancellationToken cancellationToken = default) where T : Component
         {
-            LastKey = key;
-            token.ThrowIfCancellationRequested();
+            cancellationToken.ThrowIfCancellationRequested();
             if (FailLoad) throw new InvalidOperationException("load");
-            if (LoadHook != null) await LoadHook(token);
-            token.ThrowIfCancellationRequested();
-            var instance = new GameObject("Test View", typeof(RectTransform));
-            instance.SetActive(false);
-            instance.AddComponent<Button>();
-            var view = instance.AddComponent<TestView>();
-            ViewActivation.PrepareForBinding(instance, parent);
-            Configure?.Invoke(view);
-            Created.Add(view);
-            var component = instance.GetComponent<T>();
-            Owned.Add(component);
-            return component;
+            if (LoadHook != null) await LoadHook(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var objectInstance = new GameObject(key, typeof(RectTransform));
+            objectInstance.SetActive(false);
+            objectInstance.transform.SetParent(parent, false);
+            var result = objectInstance.AddComponent<T>();
+            Created.Add(result);
+            Owned.Add(result);
+            return result;
         }
+
         public UniTask ReleaseAsync(Component view)
         {
             ReleaseCalls++;
             if (FailRelease) throw new InvalidOperationException("release");
-            Assert.IsTrue(Owned.Remove(view), "Loader must retain ownership until successful release.");
-            UnityEngine.Object.DestroyImmediate(view.gameObject);
+            Assert.IsTrue(Owned.Remove(view));
+            if (view != null) UnityEngine.Object.DestroyImmediate(view.gameObject);
             return UniTask.CompletedTask;
         }
     }
@@ -84,48 +53,46 @@ namespace MXEngine.Tests
     public abstract class NavigationTestFixture
     {
         protected const string A = "A", B = "B", C = "C", Modal = "Modal", Overlay = "Overlay";
-        internal FakeViewLoader Loader;
+        protected FakeViewLoader Loader;
         protected NavigationService Navigation;
         private GameObject _root;
-        protected readonly List<Exception> Diagnostics = new();
+        protected readonly List<Exception> Diagnostics = new List<Exception>();
 
         [SetUp]
         public void SetUp()
         {
-            Diagnostics.Clear();
-            _root = new GameObject("Test UI Root");
-            var ui = _root.AddComponent<UIRoot>();
-            foreach (var name in new[] { "ScreenRoot", "ModalRoot", "OverlayRoot" })
+            _root = new GameObject("UI Root");
+            var uiRoot = _root.AddComponent<UIRoot>();
+            foreach (string name in new[] { "ScreenRoot", "ModalRoot", "OverlayRoot" })
             {
                 var child = new GameObject(name).transform;
                 child.SetParent(_root.transform);
-                typeof(UIRoot).GetField("<" + name + ">k__BackingField", BindingFlags.Instance | BindingFlags.NonPublic)
-                    .SetValue(ui, child);
+                typeof(UIRoot).GetField("<" + name + ">k__BackingField",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                    .SetValue(uiRoot, child);
             }
             Loader = new FakeViewLoader();
-            Navigation = new NavigationService(Loader, ui);
+            Navigation = new NavigationService(Loader, uiRoot);
             Navigation.CleanupFailed += Diagnostics.Add;
         }
 
         [TearDown]
         public void TearDown()
         {
-            // Tests explicitly await shutdown to verify resource counts. This destroys
-            // remaining objects after a failed assertion without hiding ownership failures.
-            foreach (var view in Loader.Created)
-                if (view != null) UnityEngine.Object.DestroyImmediate(view.gameObject);
-            UnityEngine.Object.DestroyImmediate(_root);
+            if (_root != null) UnityEngine.Object.DestroyImmediate(_root);
         }
 
-        protected UniTask<TestScreen> Screen(string key = A, Action<TestScreen> configure = null,
-            CancellationToken token = default, bool stack = true) =>
-            Navigation.ShowScreenAsync<TestScreen, TestView, TestState>(key, v => new TestScreen(v), stack, configure, token);
-        protected UniTask<TestModal> OpenModal(CancellationToken token = default) =>
-            Navigation.ShowModalAsync<TestModal, TestView, TestState>(Modal, v => new TestModal(v), cancellationToken: token);
-        protected UniTask<TestScreen> OpenOverlay() =>
-            Navigation.ShowOverlayAsync<TestScreen, TestView, TestState>(Overlay, v => new TestScreen(v));
+        protected UniTask<TestUi> Screen(string key = A, bool stack = true,
+            CancellationToken token = default) =>
+            Navigation.ShowScreenAsync<TestUi>(key, stack, token);
 
-        protected async Task AssertEmpty()
+        protected UniTask<TestUi> OpenModal(CancellationToken token = default) =>
+            Navigation.ShowModalAsync<TestUi>(Modal, token);
+
+        protected UniTask<TestUi> OpenOverlay(CancellationToken token = default) =>
+            Navigation.ShowOverlayAsync<TestUi>(Overlay, token);
+
+        protected async UniTask AssertEmpty()
         {
             await Navigation.ShutdownAsync();
             Assert.AreEqual(0, Navigation.ScreenCount);
@@ -135,7 +102,7 @@ namespace MXEngine.Tests
             Assert.AreEqual(0, Loader.Owned.Count);
         }
 
-        protected static async Task<T> Fails<T>(Func<Task> operation) where T : Exception
+        protected static async UniTask<T> Fails<T>(Func<UniTask> operation) where T : Exception
         {
             try { await operation(); }
             catch (T exception) { return exception; }
@@ -143,14 +110,13 @@ namespace MXEngine.Tests
             return null;
         }
 
-        // UnityTest supports IEnumerator; the timeout also makes deadlocks fail visibly.
-        protected static IEnumerator Run(Func<Task> test)
+        protected static IEnumerator Run(Func<UniTask> test)
         {
-            var pending = test();
+            UniTask pending = test();
             var deadline = DateTime.UtcNow.AddSeconds(5);
             while (!pending.IsCompleted)
             {
-                Assert.Less(DateTime.UtcNow, deadline, "Async test timed out (possible deadlock).");
+                Assert.Less(DateTime.UtcNow, deadline, "Async test timed out.");
                 yield return null;
             }
             pending.GetAwaiter().GetResult();

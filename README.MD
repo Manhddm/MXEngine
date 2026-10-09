@@ -1,122 +1,141 @@
-# MXEngine UI
+# Simple MXEngine
 
-MXEngine quản lý vòng đời UI prefab trong Unity: tải View theo key Addressables, bind State, khởi tạo Presenter, điều hướng Screen/Modal/Overlay và giải phóng instance. Đây là nền UI nhỏ, không chứa dữ liệu gameplay hay hệ thống scene routing.
+Simple MXEngine is a small Unity UI navigation framework for prototypes, casual
+games, puzzle games, and teams that do not need an MVP layer for every prefab.
+Each UI prefab can use one ordinary `MonoBehaviour` for its local state,
+interaction, animation, and presentation logic.
 
-## Cấu trúc và ranh giới assembly
+MXEngine owns only UI navigation and UI lifetime. It does not provide gameplay
+state, dependency injection, an event bus, or a replacement state container.
 
-| Assembly | Nội dung | Phụ thuộc |
-| --- | --- | --- |
-| `MXEngine` | `NavigationService`, `UIRoot`, MVP, loader | UniTask, Addressables |
-| `MXEngine.Samples` | Demo điều hướng và `GameViewKey` | `MXEngine`, uGUI |
-| `MXEngine.Samples.Editor` | Builder tạo scene/prefab và đăng ký Addressables | `MXEngine.Samples`, UnityEditor |
-| `MXEngine.Tests` | Test lifecycle/navigation với `FakeViewLoader` | `MXEngine`, NUnit |
-| `MXEngine.Samples.Tests` | Test ba instance của Settings prefab Addressable | `MXEngine.Samples`, Addressables |
+## Dependencies
 
-Mỗi game truyền thẳng key Addressables vào API điều hướng. Sample đặt các hằng số trong [GameViewKey.cs](Assets/MXEngine/Samples/NavigationDemo/GameViewKey.cs).
+- Unity and uGUI
+- UniTask
+- Addressables
 
-```mermaid
-flowchart LR
-    Game[Game] --> Nav[NavigationService]
-    Nav --> Root[UIRoot]
-    Nav --> Loader[IViewLoader]
-    Loader --> Addressables[Addressables]
-    Addressables --> View[View MonoBehaviour]
-    Nav --> Presenter[Presenter]
-    Presenter --> State[ViewState]
-    Presenter --> View
-```
+All asynchronous MXEngine APIs return `UniTask`/`UniTask<T>`. The framework does
+not expose `System.Threading.Tasks.Task` APIs.
 
-Source chính: [NavigationService.cs](Assets/MXEngine/NavigationService.cs), [Presenter.cs](Assets/MXEngine/MVP/Presenter.cs), [View.cs](Assets/MXEngine/MVP/View.cs), [AddressableViewLoader.cs](Assets/MXEngine/MVP/AddressableViewLoader.cs). Demo: [NavigationDemo.cs](Assets/MXEngine/Samples/NavigationDemo/NavigationDemo.cs) và [NavigationDemoBuilder.cs](Assets/MXEngine/Samples/NavigationDemo/Editor/NavigationDemoBuilder.cs).
+## Quick start
 
-## Vòng đời khi mở View
+### 1. Create the UI root
 
-1. Game gọi `ShowScreenAsync`, `ShowModalAsync` hoặc `ShowOverlayAsync` với key Addressables, factory Presenter và tùy chọn `CancellationToken`.
-2. Service chọn `ScreenRoot`, `ModalRoot` hoặc `OverlayRoot` từ `UIRoot` theo API được gọi.
-3. Loader gọi `Addressables.InstantiateAsync(key, stage.transform)`. Stage inactive giữ prefab chưa hiển thị trong lúc tải. Mỗi instance có handle riêng trong registry `Component → AsyncOperationHandle<GameObject>`.
-4. Loader chuyển instance sang root đang active, bật rồi tắt đồng bộ để Unity chạy `Awake`. `OnEnable` có thể chạy trong bước này trước Bind; View không được đọc `State` trong `OnEnable` nếu chưa kiểm tra null. Không có frame hiển thị được yield ở bước này.
-5. Service tạo Presenter; `Presenter.InitializeAsync(token)` tạo `TState`, gọi `View.BindAsync(state, token)`, sau đó `OnInitializeAsync(state, token)`.
-6. Sau khi init hoàn tất, service bật View và commit vào stack/dictionary. Thứ tự được bảo đảm là `Awake → Bind → Presenter init → activation cuối`; `OnEnable` có thể chạy sớm ở bước 4.
+Add `UIRoot` to a persistent GameObject and assign active transforms for
+`ScreenRoot`, `ModalRoot`, and `OverlayRoot`. UI instances are parented into
+these layers automatically.
 
-Prefab cần component `TView` trên **root GameObject**. Các root của `UIRoot` phải được gán và active trong hierarchy. Hook View/Presenter trả `Task` để `ExecutionContext` đi qua các `await`; API công khai vẫn trả `UniTask`. Ví dụ chữ ký:
+### 2. Create an Addressable prefab
+
+Create a prefab with the UI component on its root GameObject. Mark it
+Addressable and choose a key such as `UI/Home`. The prefab root may be active or
+inactive; MXEngine stages it inactive and activates it only after navigation
+commits.
+
+### 3. Write the UI component
+
+No MXEngine base class is required:
 
 ```csharp
-protected override Task OnBindAsync(MyState state, CancellationToken token);
-protected override Task OnUnbindAsync(MyState state);
-protected override Task OnInitializeAsync(MyState state, CancellationToken token);
-```
-
-Khi đóng, service tắt View, `await Presenter.DisposeAsync()`, View unbind, Presenter `OnDispose()`, State `Dispose()`, rồi loader `Addressables.ReleaseInstance(handle)`. Presenter dispose idempotent; khi dispose trong lúc init đang chờ, token init bị hủy và việc giải phóng View đợi hook kết thúc. Hook async phải tôn trọng token; MXEngine không thể giải phóng View an toàn khi hook vẫn đang dùng nó.
-
-Presenter do `NavigationService` trả về thuộc quyền sở hữu của service: caller dùng nó để tương tác, nhưng đóng qua `BackToPreviousScreenAsync`, `CloseModalAsync`, `HideOverlayAsync` hoặc `ShutdownAsync`. Caller không tự `Dispose()` Presenter đó, vì entry trong navigation vẫn có thể đang active. Presenter tự tạo ngoài service có thể dùng `await DisposeAsync()`.
-
-## Điều hướng
-
-| API | Hành vi |
-| --- | --- |
-| `ShowScreenAsync(..., stack: true)` | Mở Screen mới, ẩn top cũ nhưng giữ View/State/Presenter; cùng key ở top trả Presenter hiện có; key nằm sâu được đưa lên top. |
-| `BackToPreviousScreenAsync` | Cần ít nhất hai Screen; pop/release top rồi bật Screen trước. |
-| `ShowScreenAsync(..., stack: false)` | Tạo Screen mới trước; khi commit xong, dọn toàn bộ Screen cũ. Modal/Overlay vẫn tồn tại. |
-| `ShowModalAsync` | Mỗi lần gọi tạo instance mới, kể cả cùng key. `CloseModalAsync` pop top; `CloseAllModalsAsync` dọn hết. |
-| `ShowOverlayAsync` | Mỗi key chỉ có một Overlay; có overload với hoặc không có Presenter. `HideOverlayAsync(key)` đóng. |
-| `ShutdownAsync` | Ngừng nhận request, hủy request đang chờ và dọn Screen/Modal/Overlay do service sở hữu. Gọi khi owner bị hủy. |
-
-Screen/Modal dùng `_gate`; Overlay dùng `_overlayGate`. Request bên ngoài đến trong lúc Presenter đang `await` được chờ semaphore. Nếu View/Presenter lifecycle callback gọi ngược navigation cùng lúc, `LifecycleContext` ném `InvalidOperationException` ngay để tránh deadlock. Để điều hướng tiếp, phát lệnh từ UI event sau khi hook đã hoàn tất.
-
-`CancellationToken` đi qua gate, loader, View Bind và Presenter Initialize. Hủy trong lúc tải khiến caller ngừng chờ; Addressables có thể tiếp tục tải vật lý. Loader giữ handle cho đến khi operation kết thúc rồi release kết quả. Hủy trước commit làm View mới được dọn và Screen cũ được bật lại. Sau commit, cleanup tiếp tục kể cả caller hủy token.
-
-## Lỗi và quyền sở hữu resource
-
-- Nếu instantiate thất bại, loader release handle. Nếu instance đã được tạo nhưng load bị hủy hoặc thiếu component, loader dùng `ReleaseInstance(handle)` khi operation kết thúc.
-- Loader chỉ xóa `Component → handle` sau khi `ReleaseInstance(handle)` thành công. `PendingCleanupCount` và `RetryPendingCleanup()` cho phép kiểm tra/thử lại các operation load bị bỏ dở.
-- Navigation giữ View chưa release được trong `PendingReleaseCount`; gọi `RetryPendingReleasesAsync()` sau khi sửa nguyên nhân. Ngay cả khi Presenter dispose lỗi, service vẫn thử release View.
-- Sau khi Screen mới đã commit, lỗi dọn Screen cũ được gửi qua event `CleanupFailed` và không làm `ShowScreenAsync` báo thất bại. Back/Close/Hide dùng cùng nguyên tắc sau khi thay đổi state. Lỗi cleanup trong `ShutdownAsync` được gom vào `AggregateException` và các View release lỗi vẫn có thể thử lại.
-- Nếu khởi tạo và cleanup cùng lỗi, exception chứa cả hai nguyên nhân qua `AggregateException`.
-
-## Ví dụ nhỏ
-
-```csharp
-using System.Threading;
-using System.Threading.Tasks;
-using MXEngine;
-using MXEngine.MVP;
 using UnityEngine;
 using UnityEngine.UI;
 
-public sealed class MenuState : ViewState { public string Title; }
-
-public sealed class MenuView : View<MenuState>
+public sealed class HomeScreen : MonoBehaviour
 {
-    private Text _title;
-    private void Awake() => _title = GetComponent<Text>();
-    public void Render(MenuState state) => _title.text = state.Title;
-    protected override Task OnBindAsync(MenuState state, CancellationToken token)
+    [SerializeField] private Button playButton;
+
+    private void Awake()
     {
-        Render(state);
-        return Task.CompletedTask;
+        playButton.onClick.AddListener(OnPlayClicked);
+    }
+
+    private void OnEnable()
+    {
+        // Refresh local UI state when the screen becomes visible.
+    }
+
+    private void OnDestroy()
+    {
+        playButton.onClick.RemoveListener(OnPlayClicked);
+    }
+
+    private void OnPlayClicked()
+    {
+        // Handle local interaction or call a game service.
     }
 }
-
-public sealed class MenuPresenter : ScreenPresenter<MenuView, MenuState>
-{
-    public MenuPresenter(MenuView view) : base(view) { }
-    protected override Task OnInitializeAsync(MenuState state, CancellationToken token)
-    {
-        state.Title = "Menu";
-        View.Render(state);
-        return Task.CompletedTask;
-    }
-}
-
-// Key của prefab đã đăng ký trong Addressables.
-const string MenuKey = "UI/Menu";
-await navigation.ShowScreenAsync<MenuPresenter, MenuView, MenuState>(
-    MenuKey, view => new MenuPresenter(view), cancellationToken: token);
 ```
 
-`OnBindAsync` chạy trước `OnInitializeAsync`, nên Presenter gọi `View.Render(state)` sau khi cập nhật `Title`. `ViewState` không tự phát sự kiện khi field đổi.
+### 4. Create the navigation service
 
-## Test và giới hạn
+```csharp
+using MXEngine;
 
-[TestSupport.cs](Assets/MXEngine/Tests/TestSupport.cs) dùng `FakeViewLoader`; các test lifecycle, navigation, concurrency, cancellation và failure recovery nằm trong `Assets/MXEngine/Tests/`. Test Addressables thật của cùng một Settings prefab nằm ở [AddressablesIntegrationTests.cs](Assets/MXEngine/Samples/NavigationDemo/Tests/AddressablesIntegrationTests.cs). Chạy test trong Unity Test Runner ở Play Mode. Việc source biên dịch thành công không chứng minh test hoặc demo Play Mode đã chạy thành công.
+var navigation = new NavigationService(new AddressableViewLoader(), uiRoot);
+```
 
-MXEngine không có reactive binding, DI container, transition, pooling hoặc scene router. `IDisposable.Dispose()` của Presenter là fire and forget; nơi sở hữu Addressable View nên gọi `await DisposeAsync()` hoặc để `NavigationService` quản lý.
+Keep the service with the owner of the UI root. Call `ShutdownAsync` when that
+owner is destroyed.
+
+### 5. Navigate
+
+```csharp
+var home = await navigation.ShowScreenAsync<HomeScreen>("UI/Home");
+var settings = await navigation.ShowModalAsync<SettingsPopup>("UI/Settings");
+var loading = await navigation.ShowOverlayAsync<LoadingOverlay>("UI/Loading");
+
+await navigation.BackToPreviousScreenAsync();
+await navigation.CloseModalAsync();
+await navigation.CloseAllModalsAsync();
+await navigation.HideOverlayAsync("UI/Loading");
+```
+
+Use `stack: false` to replace the screen history:
+
+```csharp
+await navigation.ShowScreenAsync<GameplayScreen>("UI/Gameplay", stack: false);
+```
+
+Every open method returns the requested `MonoBehaviour` instance. The same
+screen key at the top of the stack is reused. A screen key already deeper in
+the stack is brought to the top without instantiating another prefab. Modals
+always create a new instance, including repeated uses of the same key.
+
+## Lifecycle and ownership
+
+- Unity calls `Awake`, `OnEnable`, `OnDisable`, and `OnDestroy` normally.
+- A loaded prefab remains inactive until it has been prepared and navigation
+  commits it to its Screen, Modal, or Overlay collection.
+- A failed or cancelled request is cleaned up before it is reported.
+- Addressables handles are owned by the loader, not by UI components.
+- Do not call Addressables release directly for an instance returned by the
+  navigation service.
+- `ShutdownAsync` releases every screen, modal, and overlay owned by the
+  service.
+- If a release fails, the instance remains tracked and can be retried with
+  `RetryPendingReleasesAsync`.
+- `CleanupFailed` reports cleanup errors that occur after navigation has
+  committed successfully.
+- Navigation requests are serialized per screen/modal and overlay channel.
+  Requests made from a UI lifecycle callback fail immediately instead of
+  deadlocking the service.
+
+Pass a `CancellationToken` to any open or close method when a caller owns the
+request lifetime. Cancellation before commit does not remove the current
+screen.
+
+## API summary
+
+| API | Behavior |
+| --- | --- |
+| `ShowScreenAsync<T>(key, stack)` | Opens or reuses a screen in `ScreenRoot`. |
+| `ShowModalAsync<T>(key)` | Pushes a new modal instance into `ModalRoot`. |
+| `ShowOverlayAsync<T>(key)` | Opens one overlay for a key in `OverlayRoot`. |
+| `BackToPreviousScreenAsync()` | Releases the top screen and activates the previous one. |
+| `CloseModalAsync()` | Releases the top modal. |
+| `CloseAllModalsAsync()` | Releases all modals. |
+| `HideOverlayAsync(key)` | Releases the overlay for a key. |
+| `ShutdownAsync()` | Stops requests and releases all owned UI. |
+
+See `Assets/MXEngine/Samples/NavigationDemo` for a complete example covering
+screens, modals, overlays, buttons, Addressables, and returned instances.

@@ -2,36 +2,35 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using Cysharp.Threading.Tasks;
-using MXEngine.MVP;
 using UnityEngine;
 
 namespace MXEngine
 {
-    /// <summary>Loads views and owns their presenter lifetimes without a window framework.</summary>
+    /// <summary>Loads Addressable UI components and owns their navigation lifetime.</summary>
     public sealed class NavigationService
     {
         private readonly IViewLoader _loader;
         private readonly UIRoot _uiRoot;
-        private readonly SemaphoreSlim _gate = new(1, 1);
-        private readonly SemaphoreSlim _overlayGate = new(1, 1);
-        private readonly Stack<OpenView> _screens = new();
-        private readonly Stack<OpenView> _screenReorderBuffer = new();
-        private readonly Stack<OpenView> _modals = new();
-        private readonly Dictionary<string, OpenView> _overlays = new();
-        private readonly object _shutdownSync = new();
+        private readonly SemaphoreSlim _gate = new SemaphoreSlim(1, 1);
+        private readonly SemaphoreSlim _overlayGate = new SemaphoreSlim(1, 1);
+        private readonly Stack<OpenView> _screens = new Stack<OpenView>();
+        private readonly Stack<OpenView> _reorderBuffer = new Stack<OpenView>();
+        private readonly Stack<OpenView> _modals = new Stack<OpenView>();
+        private readonly Dictionary<string, OpenView> _overlays = new Dictionary<string, OpenView>();
+        private readonly List<OpenView> _pendingReleases = new List<OpenView>();
+        private readonly object _shutdownSync = new object();
+        private readonly CancellationTokenSource _lifetime = new CancellationTokenSource();
         private UniTaskCompletionSource _shutdownCompletion;
         private volatile bool _shutdownRequested;
-        private readonly CancellationTokenSource _lifetime = new();
-        private readonly List<OpenView> _pendingReleases = new();
 
-        /// <summary>Post-commit cleanup errors do not turn successful navigation into failure.</summary>
+        /// <summary>Raised when committed navigation cleanup needs a later retry.</summary>
         public event Action<Exception> CleanupFailed;
 
-        public int ScreenCount => _screens.Count;
-        public int ModalCount => _modals.Count;
-        public int OverlayCount => _overlays.Count;
-        public int PendingReleaseCount => _pendingReleases.Count;
-        public bool IsInTransition => _gate.CurrentCount == 0 || _overlayGate.CurrentCount == 0;
+        public int ScreenCount { get { return _screens.Count; } }
+        public int ModalCount { get { return _modals.Count; } }
+        public int OverlayCount { get { return _overlays.Count; } }
+        public int PendingReleaseCount { get { return _pendingReleases.Count; } }
+        public bool IsInTransition { get { return _gate.CurrentCount == 0 || _overlayGate.CurrentCount == 0; } }
 
         public NavigationService(IViewLoader loader, UIRoot uiRoot)
         {
@@ -39,519 +38,356 @@ namespace MXEngine
             _uiRoot = uiRoot ?? throw new ArgumentNullException(nameof(uiRoot));
         }
 
-        public async UniTask<TPresenter> ShowScreenAsync<TPresenter, TView, TState>(
-            string key, Func<TView, TPresenter> createPresenter, bool stack = true,
-            Action<TPresenter> configurePresenter = null, CancellationToken cancellationToken = default)
-            where TPresenter : ScreenPresenter<TView, TState>
-            where TView : View<TState>
-            where TState : ViewState, new()
+        /// <summary>Opens a screen and returns its component instance.</summary>
+        public UniTask<T> ShowScreenAsync<T>(string key, bool stack = true,
+            CancellationToken cancellationToken = default) where T : MonoBehaviour
+        {
+            return ShowScreenCoreAsync<T>(key, stack, cancellationToken);
+        }
+
+        /// <summary>Opens a modal instance and returns its component instance.</summary>
+        public UniTask<T> ShowModalAsync<T>(string key,
+            CancellationToken cancellationToken = default) where T : MonoBehaviour
+        {
+            return ShowModalCoreAsync<T>(key, cancellationToken);
+        }
+
+        /// <summary>Opens one overlay for the key and returns its component instance.</summary>
+        public UniTask<T> ShowOverlayAsync<T>(string key,
+            CancellationToken cancellationToken = default) where T : MonoBehaviour
+        {
+            return ShowOverlayCoreAsync<T>(key, cancellationToken);
+        }
+
+        private async UniTask<T> ShowScreenCoreAsync<T>(string key, bool stack,
+            CancellationToken cancellationToken) where T : MonoBehaviour
         {
             ThrowIfUnavailable();
-            using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
-            cancellationToken = requestCancellation.Token;
-            await _gate.WaitAsync(cancellationToken);
-            try
+            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                ThrowIfUnavailable();
-                ValidateKey(key);
-                if (stack && _screens.Count > 0 && _screens.Peek().Key == key)
-                    return GetScreenPresenter<TPresenter>(_screens.Peek(), key);
-
-                if (stack)
-                {
-                    OpenView existing = null;
-                    foreach (var screen in _screens)
-                    {
-                        if (screen.Key != key)
-                            continue;
-                        existing = screen;
-                        break;
-                    }
-
-                    if (existing != null)
-                    {
-                        var existingPresenter = GetScreenPresenter<TPresenter>(existing, key);
-                        var current = _screens.Peek();
-                        SetActive(current, false);
-                        try
-                        {
-                            SetActive(existing, true);
-                            cancellationToken.ThrowIfCancellationRequested();
-                        }
-                        catch (Exception operationException)
-                        {
-                            Exception recoveryException = null;
-                            try { SetActive(existing, false); SetActive(current, true); }
-                            catch (Exception exception) { recoveryException = exception; }
-                            if (recoveryException != null)
-                                throw new AggregateException("Screen reorder recovery failed.",
-                                    operationException, recoveryException);
-                            throw;
-                        }
-                        while (!ReferenceEquals(_screens.Peek(), existing))
-                            _screenReorderBuffer.Push(_screens.Pop());
-                        _screens.Pop();
-                        while (_screenReorderBuffer.Count > 0)
-                            _screens.Push(_screenReorderBuffer.Pop());
-                        _screens.Push(existing);
-                        return existingPresenter;
-                    }
-                }
-
-                var (presenter, opened) = await CreateAsync<TPresenter, TView, TState>(key, "Screen",
-                    _uiRoot.ScreenRoot, createPresenter, configurePresenter, cancellationToken);
-                var committed = false;
+                var token = linked.Token;
+                await _gate.WaitAsync(token);
                 try
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    ThrowIfShuttingDown();
+                    token.ThrowIfCancellationRequested();
+                    ValidateKey(key);
+                    if (stack && _screens.Count > 0 && _screens.Peek().Key == key)
+                        return GetComponent<T>(_screens.Peek(), key);
+
                     if (stack)
                     {
-                        if (_screens.Count > 0)
-                            SetActive(_screens.Peek(), false);
+                        OpenView existing = FindScreen(key);
+                        if (existing != null)
+                        {
+                            T result = GetComponent<T>(existing, key);
+                            OpenView current = _screens.Peek();
+                            SetActive(current, false);
+                            try
+                            {
+                                SetActive(existing, true);
+                                token.ThrowIfCancellationRequested();
+                            }
+                            catch (Exception operationException)
+                            {
+                                Exception recovery = null;
+                                try { SetActive(existing, false); SetActive(current, true); }
+                                catch (Exception recoveryException) { recovery = recoveryException; }
+                                if (recovery != null)
+                                    throw new AggregateException("Screen reorder recovery failed.",
+                                        operationException, recovery);
+                                throw;
+                            }
+                            while (!ReferenceEquals(_screens.Peek(), existing))
+                                _reorderBuffer.Push(_screens.Pop());
+                            _screens.Pop();
+                            while (_reorderBuffer.Count > 0)
+                                _screens.Push(_reorderBuffer.Pop());
+                            _screens.Push(existing);
+                            return result;
+                        }
+                    }
 
+                    OpenView opened = await CreateAsync<T>(key, _uiRoot.ScreenRoot, token);
+                    bool committed = false;
+                    try
+                    {
+                        token.ThrowIfCancellationRequested();
+                        if (_screens.Count > 0) SetActive(_screens.Peek(), false);
                         SetActive(opened, true);
-                        cancellationToken.ThrowIfCancellationRequested();
+                        token.ThrowIfCancellationRequested();
+                        if (stack)
+                        {
+                            _screens.Push(opened);
+                            committed = true;
+                            return GetComponent<T>(opened, key);
+                        }
+
+                        var oldScreens = new List<OpenView>(_screens);
+                        _screens.Clear();
                         _screens.Push(opened);
                         committed = true;
-                        return presenter;
+                        List<Exception> errors = null;
+                        foreach (OpenView oldScreen in oldScreens)
+                            AddError(ref errors, await TryReleaseAsync(oldScreen));
+                        if (errors != null)
+                            ReportCleanupFailure(new AggregateException("Screen replacement cleanup failed.", errors));
+                        return GetComponent<T>(opened, key);
                     }
-
-                    // A replace commits the new screen before releasing old screens. Teardown
-                    // failures cannot roll back an Addressables instance that was released.
-                    if (_screens.Count > 0)
-                        SetActive(_screens.Peek(), false);
-                    SetActive(opened, true);
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var oldScreens = new List<OpenView>(_screens.Count);
-                    while (_screens.Count > 0)
-                        oldScreens.Add(_screens.Pop());
-                    _screens.Push(opened);
-                    committed = true;
-
-                    List<Exception> errors = null;
-                    foreach (var oldScreen in oldScreens)
+                    catch (Exception operationException)
                     {
-                        try
+                        if (committed) throw;
+                        Exception recovery = null;
+                        if (_screens.Count > 0)
                         {
-                            await ReleaseAsync(oldScreen);
+                            try { SetActive(_screens.Peek(), true); }
+                            catch (Exception exception) { recovery = exception; }
                         }
-                        catch (Exception exception)
-                        {
-                            (errors ??= new List<Exception>()).Add(exception);
-                        }
-                    }
-
-                    if (errors != null)
-                        ReportCleanupFailure(new AggregateException("Screen replacement teardown failed.", errors));
-                    return presenter;
-                }
-                catch (Exception operationException)
-                {
-                    if (committed)
+                        AddError(ref recovery, await TryReleaseAsync(opened));
+                        if (recovery != null)
+                            throw new AggregateException("Screen open and recovery both failed.",
+                                operationException, recovery);
                         throw;
-
-                    Exception recoveryException = null;
-                    if (_screens.Count > 0)
-                    {
-                        try
-                        {
-                            SetActive(_screens.Peek(), true);
-                        }
-                        catch (Exception exception)
-                        {
-                            recoveryException = exception;
-                        }
                     }
-                    try
-                    {
-                        await ReleaseAsync(opened);
-                    }
-                    catch (Exception exception)
-                    {
-                        recoveryException = recoveryException == null
-                            ? exception : new AggregateException(recoveryException, exception);
-                    }
-                    if (recoveryException != null)
-                        throw new AggregateException("Screen open and recovery both failed.",
-                            operationException, recoveryException);
-                    throw;
                 }
-            }
-            finally
-            {
-                _gate.Release();
+                finally { _gate.Release(); }
             }
         }
 
-        public async UniTask<TPresenter> ShowModalAsync<TPresenter, TView, TState>(
-            string key, Func<TView, TPresenter> createPresenter,
-            Action<TPresenter> configurePresenter = null, CancellationToken cancellationToken = default)
-            where TPresenter : ModalPresenter<TView, TState>
-            where TView : View<TState>
-            where TState : ViewState, new()
+        private async UniTask<T> ShowModalCoreAsync<T>(string key,
+            CancellationToken cancellationToken) where T : MonoBehaviour
         {
             ThrowIfUnavailable();
-            using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
-            cancellationToken = requestCancellation.Token;
-            await _gate.WaitAsync(cancellationToken);
-            try
+            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                ThrowIfUnavailable();
-                var (presenter, opened) = await CreateAsync<TPresenter, TView, TState>(key, "Modal",
-                    _uiRoot.ModalRoot, createPresenter, configurePresenter, cancellationToken);
+                var token = linked.Token;
+                await _gate.WaitAsync(token);
                 try
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    ThrowIfShuttingDown();
-                    SetActive(opened, true);
-                    cancellationToken.ThrowIfCancellationRequested();
-                    _modals.Push(opened);
-                    return presenter;
-                }
-                catch (Exception openException)
-                {
+                    token.ThrowIfCancellationRequested();
+                    ValidateKey(key);
+                    OpenView opened = await CreateAsync<T>(key, _uiRoot.ModalRoot, token);
                     try
                     {
-                        await ReleaseAsync(opened);
+                        SetActive(opened, true);
+                        token.ThrowIfCancellationRequested();
+                        _modals.Push(opened);
+                        return GetComponent<T>(opened, key);
                     }
-                    catch (Exception cleanupException)
+                    catch (Exception openException)
                     {
-                        throw new AggregateException("Modal open and cleanup both failed.",
-                            openException, cleanupException);
+                        Exception cleanup = await TryReleaseAsync(opened);
+                        if (cleanup != null)
+                            throw new AggregateException("Modal open and cleanup both failed.",
+                                openException, cleanup);
+                        throw;
                     }
-                    throw;
                 }
-            }
-            finally
-            {
-                _gate.Release();
+                finally { _gate.Release(); }
             }
         }
 
-        public async UniTask<TPresenter> ShowOverlayAsync<TPresenter, TView, TState>(
-            string key, Func<TView, TPresenter> createPresenter,
-            Action<TPresenter> configurePresenter = null, CancellationToken cancellationToken = default)
-            where TPresenter : Presenter<TView, TState>
-            where TView : View<TState>
-            where TState : ViewState, new()
+        private async UniTask<T> ShowOverlayCoreAsync<T>(string key,
+            CancellationToken cancellationToken) where T : MonoBehaviour
         {
             ThrowIfUnavailable();
-            using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
-            cancellationToken = requestCancellation.Token;
-            await _overlayGate.WaitAsync(cancellationToken);
-            try
+            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                ThrowIfUnavailable();
-                ValidateKey(key);
-                if (_overlays.ContainsKey(key))
-                    throw new InvalidOperationException($"Overlay {key} is already open.");
-
-                var (presenter, opened) = await CreateAsync<TPresenter, TView, TState>(key, "Overlay",
-                    _uiRoot.OverlayRoot, createPresenter, configurePresenter, cancellationToken);
+                var token = linked.Token;
+                await _overlayGate.WaitAsync(token);
                 try
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    ThrowIfShuttingDown();
-                    SetActive(opened, true);
-                    cancellationToken.ThrowIfCancellationRequested();
-                    _overlays.Add(key, opened);
-                    return presenter;
-                }
-                catch (Exception openException)
-                {
+                    token.ThrowIfCancellationRequested();
+                    ValidateKey(key);
+                    if (_overlays.ContainsKey(key))
+                        throw new InvalidOperationException("Overlay " + key + " is already open.");
+                    OpenView opened = await CreateAsync<T>(key, _uiRoot.OverlayRoot, token);
                     try
                     {
-                        await ReleaseAsync(opened);
+                        SetActive(opened, true);
+                        token.ThrowIfCancellationRequested();
+                        _overlays.Add(key, opened);
+                        return GetComponent<T>(opened, key);
                     }
-                    catch (Exception cleanupException)
+                    catch (Exception openException)
                     {
-                        throw new AggregateException("Overlay open and cleanup both failed.",
-                            openException, cleanupException);
+                        Exception cleanup = await TryReleaseAsync(opened);
+                        if (cleanup != null)
+                            throw new AggregateException("Overlay open and cleanup both failed.",
+                                openException, cleanup);
+                        throw;
                     }
-                    throw;
                 }
-            }
-            finally
-            {
-                _overlayGate.Release();
+                finally { _overlayGate.Release(); }
             }
         }
 
-        // Useful for loading overlays with no state or presenter.
-        public async UniTask<TView> ShowOverlayAsync<TView>(string key,
-            CancellationToken cancellationToken = default) where TView : Component
-        {
-            ThrowIfUnavailable();
-            using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
-            cancellationToken = requestCancellation.Token;
-            await _overlayGate.WaitAsync(cancellationToken);
-            try
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                ThrowIfUnavailable();
-                ValidateKey(key);
-                if (_overlays.ContainsKey(key))
-                    throw new InvalidOperationException($"Overlay {key} is already open.");
-                if (_uiRoot.OverlayRoot == null)
-                    throw new InvalidOperationException("UI root for Overlay is not assigned.");
-
-                var view = await _loader.LoadAsync<TView>(key, _uiRoot.OverlayRoot, cancellationToken);
-                try
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    ThrowIfShuttingDown();
-                    if (view == null)
-                        throw new InvalidOperationException($"Loader returned no View for {key}.");
-                    SetActive(view, true);
-                    cancellationToken.ThrowIfCancellationRequested();
-                    _overlays.Add(key, new OpenView(key, view, null, null));
-                    return view;
-                }
-                catch (Exception openException)
-                {
-                    try
-                    {
-                        await ReleaseAsync(new OpenView(key, view, null, null));
-                    }
-                    catch (Exception cleanupException)
-                    {
-                        throw new AggregateException("Overlay open and cleanup both failed.",
-                            openException, cleanupException);
-                    }
-                    throw;
-                }
-            }
-            finally
-            {
-                _overlayGate.Release();
-            }
-        }
-
+        /// <summary>Returns to the previous screen, or false when there is no previous screen.</summary>
         public async UniTask<bool> BackToPreviousScreenAsync(CancellationToken cancellationToken = default)
         {
             ThrowIfUnavailable();
-            using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
-            cancellationToken = requestCancellation.Token;
-            await _gate.WaitAsync(cancellationToken);
-            try
+            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                ThrowIfUnavailable();
-                if (_screens.Count < 2)
-                    return false;
-
-                var opened = _screens.Pop();
-                List<Exception> errors = null;
-                AddError(ref errors, await TryReleaseAsync(opened));
-                try { SetActive(_screens.Peek(), true); }
-                catch (Exception exception) { AddError(ref errors, exception); }
-                if (errors != null)
-                    ReportCleanupFailure(new AggregateException("Back navigation cleanup failed.", errors));
-                return true;
-            }
-            finally
-            {
-                _gate.Release();
+                var token = linked.Token;
+                await _gate.WaitAsync(token);
+                try
+                {
+                    token.ThrowIfCancellationRequested();
+                    if (_screens.Count < 2) return false;
+                    OpenView opened = _screens.Pop();
+                    List<Exception> errors = null;
+                    AddError(ref errors, await TryReleaseAsync(opened));
+                    try { SetActive(_screens.Peek(), true); }
+                    catch (Exception exception) { AddError(ref errors, exception); }
+                    if (errors != null) ReportCleanupFailure(new AggregateException("Back navigation cleanup failed.", errors));
+                    return true;
+                }
+                finally { _gate.Release(); }
             }
         }
 
+        /// <summary>Closes the top modal, returning false when none is open.</summary>
         public async UniTask<bool> CloseModalAsync(CancellationToken cancellationToken = default)
         {
             ThrowIfUnavailable();
-            using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
-            cancellationToken = requestCancellation.Token;
-            await _gate.WaitAsync(cancellationToken);
-            try
+            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                ThrowIfUnavailable();
-                if (_modals.Count == 0)
-                    return false;
-
-                var error = await TryReleaseAsync(_modals.Pop());
-                if (error != null) ReportCleanupFailure(error);
-                return true;
-            }
-            finally
-            {
-                _gate.Release();
+                var token = linked.Token;
+                await _gate.WaitAsync(token);
+                try
+                {
+                    token.ThrowIfCancellationRequested();
+                    if (_modals.Count == 0) return false;
+                    Exception error = await TryReleaseAsync(_modals.Pop());
+                    if (error != null) ReportCleanupFailure(error);
+                    return true;
+                }
+                finally { _gate.Release(); }
             }
         }
 
+        /// <summary>Closes every open modal and reports cleanup failures.</summary>
         public async UniTask CloseAllModalsAsync(CancellationToken cancellationToken = default)
         {
             ThrowIfUnavailable();
-            using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
-            cancellationToken = requestCancellation.Token;
-            await _gate.WaitAsync(cancellationToken);
-            try
+            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                ThrowIfUnavailable();
-                List<Exception> errors = null;
-                while (_modals.Count > 0)
+                var token = linked.Token;
+                await _gate.WaitAsync(token);
+                try
                 {
-                    try
-                    {
-                        await ReleaseAsync(_modals.Pop());
-                    }
-                    catch (Exception exception)
-                    {
-                        (errors ??= new List<Exception>()).Add(exception);
-                    }
+                    token.ThrowIfCancellationRequested();
+                    List<Exception> errors = null;
+                    while (_modals.Count > 0)
+                        AddError(ref errors, await TryReleaseAsync(_modals.Pop()));
+                    if (errors != null) ReportCleanupFailure(new AggregateException("Modal cleanup failed.", errors));
                 }
-                if (errors != null)
-                    ReportCleanupFailure(new AggregateException("Modal teardown failed.", errors));
-            }
-            finally
-            {
-                _gate.Release();
+                finally { _gate.Release(); }
             }
         }
 
+        /// <summary>Hides an overlay by key, returning false when it is not open.</summary>
         public async UniTask<bool> HideOverlayAsync(string key,
             CancellationToken cancellationToken = default)
         {
             ThrowIfUnavailable();
-            using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
-            cancellationToken = requestCancellation.Token;
-            await _overlayGate.WaitAsync(cancellationToken);
-            try
+            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                ThrowIfUnavailable();
-                ValidateKey(key);
-                if (!_overlays.TryGetValue(key, out var opened))
-                    return false;
-
-                _overlays.Remove(key);
-                var error = await TryReleaseAsync(opened);
-                if (error != null) ReportCleanupFailure(error);
-                return true;
-            }
-            finally
-            {
-                _overlayGate.Release();
-            }
-        }
-
-        private static void ValidateKey(string key)
-        {
-            if (string.IsNullOrWhiteSpace(key))
-                throw new ArgumentException("View key is required.", nameof(key));
-        }
-
-        private static TPresenter GetScreenPresenter<TPresenter>(OpenView screen, string key)
-        {
-            if (screen.Presenter is TPresenter presenter)
-                return presenter;
-            throw new InvalidOperationException($"Screen {key} was opened with a different presenter type.");
-        }
-
-        private async UniTask<(TPresenter presenter, OpenView opened)> CreateAsync<TPresenter, TView, TState>(
-            string key, string layer, Transform root, Func<TView, TPresenter> createPresenter,
-            Action<TPresenter> configurePresenter, CancellationToken cancellationToken)
-            where TPresenter : Presenter<TView, TState>
-            where TView : View<TState>
-            where TState : ViewState, new()
-        {
-            if (createPresenter == null)
-                throw new ArgumentNullException(nameof(createPresenter));
-            ValidateKey(key);
-            if (root == null)
-                throw new InvalidOperationException($"UI root for {layer} is not assigned.");
-
-            var view = await _loader.LoadAsync<TView>(key, root, cancellationToken);
-            TPresenter presenter = null;
-            try
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                ThrowIfShuttingDown();
-                if (view == null)
-                    throw new InvalidOperationException($"Loader returned no View for {key}.");
-                SetActive(view, false);
-                using (LifecycleContext.Enter())
-                {
-                    presenter = createPresenter(view) ??
-                        throw new InvalidOperationException($"Presenter factory for {key} returned null.");
-                    configurePresenter?.Invoke(presenter);
-                }
-                await presenter.InitializeAsync(cancellationToken);
-                cancellationToken.ThrowIfCancellationRequested();
-                ThrowIfShuttingDown();
-                return (presenter, new OpenView(key, view, presenter, presenter.DisposeAsync));
-            }
-            catch (Exception createException)
-            {
+                var token = linked.Token;
+                await _overlayGate.WaitAsync(token);
                 try
                 {
-                    await ReleaseAsync(new OpenView(key, view, presenter,
-                        presenter == null ? null : presenter.DisposeAsync));
+                    token.ThrowIfCancellationRequested();
+                    ValidateKey(key);
+                    OpenView opened;
+                    if (!_overlays.TryGetValue(key, out opened)) return false;
+                    _overlays.Remove(key);
+                    Exception error = await TryReleaseAsync(opened);
+                    if (error != null) ReportCleanupFailure(error);
+                    return true;
                 }
-                catch (Exception cleanupException)
-                {
-                    throw new AggregateException("View creation and cleanup both failed.",
-                        createException, cleanupException);
-                }
-                throw;
+                finally { _overlayGate.Release(); }
             }
         }
 
-        private async UniTask ReleaseAsync(OpenView opened)
-        {
-            List<Exception> presenterErrors = null;
-            try
-            {
-                SetActive(opened, false);
-            }
-            catch (Exception exception)
-            {
-                (presenterErrors ??= new List<Exception>()).Add(exception);
-            }
-            if (!opened.DisposeAttempted && opened.DisposePresenter != null)
-            {
-                opened.DisposeAttempted = true;
-                try { await opened.DisposePresenter(); }
-                catch (Exception exception) { (presenterErrors ??= new List<Exception>()).Add(exception); }
-            }
-            try
-            {
-                await _loader.ReleaseAsync(opened.View);
-                _pendingReleases.Remove(opened);
-            }
-            catch (Exception releaseException)
-            {
-                if (!_pendingReleases.Contains(opened))
-                    _pendingReleases.Add(opened);
-                if (presenterErrors != null)
-                    throw new AggregateException("Presenter and View teardown both failed.",
-                        new AggregateException(presenterErrors), releaseException);
-                throw;
-            }
-            ThrowIfErrors("View lifecycle teardown failed.", presenterErrors);
-        }
-
-        /// <summary>Stop accepting requests and release every View owned by this service.</summary>
+        /// <summary>Stops requests and releases every UI owned by this service.</summary>
         public UniTask ShutdownAsync()
         {
             LifecycleContext.ThrowIfActive();
             lock (_shutdownSync)
             {
-                if (_shutdownCompletion != null)
-                    return _shutdownCompletion.Task;
-
+                if (_shutdownCompletion != null) return _shutdownCompletion.Task;
                 _shutdownRequested = true;
                 _shutdownCompletion = new UniTaskCompletionSource();
             }
-
-            try { _lifetime.Cancel(); }
-            catch (Exception exception) { ReportCleanupFailure(exception); }
+            _lifetime.Cancel();
             ShutdownCoreAsync().Forget();
             return _shutdownCompletion.Task;
+        }
+
+        /// <summary>Retries releases that previously failed.</summary>
+        public async UniTask RetryPendingReleasesAsync()
+        {
+            LifecycleContext.ThrowIfActive();
+            await _gate.WaitAsync();
+            try
+            {
+                await _overlayGate.WaitAsync();
+                try
+                {
+                    List<Exception> errors = null;
+                    foreach (OpenView opened in _pendingReleases.ToArray())
+                        AddError(ref errors, await TryReleaseAsync(opened));
+                    if (errors != null) throw new AggregateException("Some UI releases are still pending.", errors);
+                }
+                finally { _overlayGate.Release(); }
+            }
+            finally { _gate.Release(); }
+        }
+
+        private async UniTask<OpenView> CreateAsync<T>(string key, Transform root,
+            CancellationToken token) where T : MonoBehaviour
+        {
+            if (root == null) throw new InvalidOperationException("UI root is not assigned.");
+            T view = null;
+            try
+            {
+                view = await _loader.LoadAsync<T>(key, root, token);
+                token.ThrowIfCancellationRequested();
+                if (view == null) throw new InvalidOperationException("Loader returned no UI for " + key + ".");
+                return new OpenView(key, view);
+            }
+            catch (Exception openException)
+            {
+                if (view != null)
+                {
+                    Exception cleanup = await TryReleaseAsync(new OpenView(key, view));
+                    if (cleanup != null)
+                        throw new AggregateException("UI creation and cleanup both failed.", openException, cleanup);
+                }
+                throw;
+            }
+        }
+
+        private async UniTask<Exception> TryReleaseAsync(OpenView opened)
+        {
+            try { await ReleaseAsync(opened); return null; }
+            catch (Exception exception) { return exception; }
+        }
+
+        private async UniTask ReleaseAsync(OpenView opened)
+        {
+            try { SetActive(opened, false); }
+            catch (Exception exception) { ReportCleanupFailure(exception); }
+            try
+            {
+                await _loader.ReleaseAsync(opened.View);
+                _pendingReleases.Remove(opened);
+            }
+            catch
+            {
+                if (!_pendingReleases.Contains(opened)) _pendingReleases.Add(opened);
+                throw;
+            }
         }
 
         private async UniTask ShutdownCoreAsync()
@@ -565,131 +401,84 @@ namespace MXEngine
                     try
                     {
                         List<Exception> errors = null;
-                        var pending = _pendingReleases.ToArray();
-                        foreach (var opened in pending)
-                            AddError(ref errors, await TryReleaseAsync(opened));
-                        var overlays = new List<OpenView>(_overlays.Values);
+                        foreach (OpenView pending in _pendingReleases.ToArray())
+                            AddError(ref errors, await TryReleaseAsync(pending));
+                        foreach (OpenView overlay in new List<OpenView>(_overlays.Values))
+                            AddError(ref errors, await TryReleaseAsync(overlay));
                         _overlays.Clear();
-                        foreach (var opened in overlays)
-                            AddError(ref errors, await TryReleaseAsync(opened));
-                        while (_modals.Count > 0)
-                            AddError(ref errors, await TryReleaseAsync(_modals.Pop()));
-                        while (_screens.Count > 0)
-                            AddError(ref errors, await TryReleaseAsync(_screens.Pop()));
-
-                        ThrowIfErrors("Navigation shutdown failed to release some views.", errors);
+                        while (_modals.Count > 0) AddError(ref errors, await TryReleaseAsync(_modals.Pop()));
+                        while (_screens.Count > 0) AddError(ref errors, await TryReleaseAsync(_screens.Pop()));
+                        if (errors != null) throw new AggregateException("Navigation shutdown failed.", errors);
                     }
-                    finally
-                    {
-                        _overlayGate.Release();
-                    }
+                    finally { _overlayGate.Release(); }
                 }
-                finally
-                {
-                    _gate.Release();
-                }
-
+                finally { _gate.Release(); }
                 _shutdownCompletion.TrySetResult();
             }
-            catch (Exception exception)
-            {
-                _shutdownCompletion.TrySetException(exception);
-            }
+            catch (Exception exception) { _shutdownCompletion.TrySetException(exception); }
         }
 
-        /// <summary>Retry resources whose loader release failed, including after shutdown.</summary>
-        public async UniTask RetryPendingReleasesAsync()
+        private OpenView FindScreen(string key)
         {
-            LifecycleContext.ThrowIfActive();
-            await _gate.WaitAsync();
-            try
-            {
-                await _overlayGate.WaitAsync();
-                try
-                {
-                    List<Exception> errors = null;
-                    foreach (var opened in _pendingReleases.ToArray())
-                        AddError(ref errors, await TryReleaseAsync(opened));
-                    ThrowIfErrors("Some View releases are still pending.", errors);
-                }
-                finally { _overlayGate.Release(); }
-            }
-            finally { _gate.Release(); }
+            foreach (OpenView screen in _screens)
+                if (screen.Key == key) return screen;
+            return null;
         }
 
-        private void SetActive(OpenView opened, bool active) => SetActive(opened.View, active);
+        private static T GetComponent<T>(OpenView opened, string key) where T : MonoBehaviour
+        {
+            T result = opened.View as T;
+            if (result == null)
+                throw new InvalidOperationException("Key " + key + " is already owned by " +
+                    opened.View.GetType().Name + ", not " + typeof(T).Name + ".");
+            return result;
+        }
 
-        private void SetActive(Component view, bool active)
+        private static void ValidateKey(string key)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                throw new ArgumentException("UI key is required.", nameof(key));
+        }
+
+        private void SetActive(OpenView opened, bool active)
         {
             using (LifecycleContext.Enter())
-                if (view != null)
-                view.gameObject.SetActive(active);
+                if (opened.View != null) opened.View.gameObject.SetActive(active);
         }
 
         private void ThrowIfUnavailable()
         {
-            ThrowIfShuttingDown();
             LifecycleContext.ThrowIfActive();
+            if (_shutdownRequested) throw new ObjectDisposedException(nameof(NavigationService));
         }
 
         private void ReportCleanupFailure(Exception exception)
         {
-            using var context = LifecycleContext.Enter();
-            var handlers = CleanupFailed;
-            if (handlers == null) { Debug.LogException(exception); return; }
-            foreach (Action<Exception> handler in handlers.GetInvocationList())
+            Action<Exception> handler = CleanupFailed;
+            if (handler == null) { Debug.LogException(exception); return; }
+            foreach (Action<Exception> callback in handler.GetInvocationList())
             {
-                try { handler(exception); }
-                catch (Exception diagnosticException) { Debug.LogException(diagnosticException); }
+                try { callback(exception); }
+                catch (Exception callbackException) { Debug.LogException(callbackException); }
             }
         }
 
-        private void ThrowIfShuttingDown()
+        private static void AddError(ref List<Exception> errors, Exception error)
         {
-            if (_shutdownRequested)
-                throw new ObjectDisposedException(nameof(NavigationService));
+            if (error != null) (errors ??= new List<Exception>()).Add(error);
         }
 
-        private async UniTask<Exception> TryReleaseAsync(OpenView opened)
+        private static void AddError(ref Exception error, Exception additional)
         {
-            try
-            {
-                await ReleaseAsync(opened);
-                return null;
-            }
-            catch (Exception exception)
-            {
-                return exception;
-            }
-        }
-
-        private static void AddError(ref List<Exception> errors, Exception exception)
-        {
-            if (exception != null)
-                (errors ??= new List<Exception>()).Add(exception);
-        }
-
-        private static void ThrowIfErrors(string message, List<Exception> errors)
-        {
-            if (errors != null && errors.Count > 0)
-                throw new AggregateException(message, errors);
+            if (additional == null) return;
+            error = error == null ? additional : new AggregateException(error, additional);
         }
 
         private sealed class OpenView
         {
-            public readonly string Key;
-            public readonly Component View;
-            public readonly object Presenter;
-            public readonly Func<UniTask> DisposePresenter;
-            public bool DisposeAttempted;
-
-            public OpenView(string key, Component view, object presenter, Func<UniTask> disposePresenter)
-            {
-                Key = key;
-                View = view;
-                Presenter = presenter;
-                DisposePresenter = disposePresenter;
-            }
+            internal readonly string Key;
+            internal readonly Component View;
+            internal OpenView(string key, Component view) { Key = key; View = view; }
         }
     }
 }
