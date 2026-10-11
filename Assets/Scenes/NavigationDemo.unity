@@ -1851,7 +1851,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 2b7d774d7a1e4b3fba9e94d9d8008557, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::DEMO_TEST.Scripts.GameController
+  m_EditorClassIdentifier: MXEngine.Samples::MXEngine.Samples.GameController
   canvas: {fileID: 1603684024}
   uiRoot: {fileID: 1603684021}
 --- !u!4 &1358776925

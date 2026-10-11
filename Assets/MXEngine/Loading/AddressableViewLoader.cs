@@ -77,8 +77,9 @@ namespace MXEngine
             if (!_instances.TryGetValue(view, out handle))
                 throw new InvalidOperationException("UI was not created by this loader or was already released.");
             if (!handle.IsValid()) throw new InvalidOperationException("Owned Addressables handle is invalid.");
-            if (!Addressables.ReleaseInstance(handle))
-                throw new InvalidOperationException("Addressables did not release the owned instance.");
+            using (LifecycleContext.Enter())
+                if (!Addressables.ReleaseInstance(handle))
+                    throw new InvalidOperationException("Addressables did not release the owned instance.");
             _instances.Remove(view);
             return UniTask.CompletedTask;
         }
@@ -100,8 +101,9 @@ namespace MXEngine
                 {
                     if (pending.Handle.Status == AsyncOperationStatus.Succeeded && pending.Handle.Result != null)
                     {
-                        if (!Addressables.ReleaseInstance(pending.Handle))
-                            throw new InvalidOperationException("Addressables did not release an abandoned instance.");
+                        using (LifecycleContext.Enter())
+                            if (!Addressables.ReleaseInstance(pending.Handle))
+                                throw new InvalidOperationException("Addressables did not release an abandoned instance.");
                     }
                     else Addressables.Release(pending.Handle);
                 }

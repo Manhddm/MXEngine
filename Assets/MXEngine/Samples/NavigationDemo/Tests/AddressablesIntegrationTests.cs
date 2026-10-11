@@ -20,7 +20,7 @@ namespace MXEngine.Samples.Tests
             var deadline = DateTime.UtcNow.AddSeconds(20);
             try
             {
-                while (!pending.IsCompleted)
+                while (!pending.GetAwaiter().IsCompleted)
                 {
                     Assert.Less(DateTime.UtcNow, deadline, "Addressable load timed out.");
                     yield return null;
@@ -41,6 +41,12 @@ namespace MXEngine.Samples.Tests
                 third = await loader.LoadAsync<NavigationDemoView>(key, parent);
                 Assert.AreNotSame(first, second);
                 Assert.AreNotSame(second, third);
+                Assert.IsFalse(first.gameObject.activeSelf);
+                Assert.IsFalse(second.gameObject.activeSelf);
+                Assert.IsFalse(third.gameObject.activeSelf);
+                Assert.AreSame(parent, first.transform.parent);
+                Assert.AreSame(parent, second.transform.parent);
+                Assert.AreSame(parent, third.transform.parent);
                 Assert.AreEqual(3, loader.OwnedInstanceCount);
             }
             finally

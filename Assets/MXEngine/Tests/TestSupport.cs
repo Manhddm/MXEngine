@@ -12,8 +12,12 @@ namespace MXEngine.Tests
     {
         public int Enables;
         public int Disables;
-        private void OnEnable() { Enables++; }
-        private void OnDisable() { Disables++; }
+        public Action EnableHook;
+        public Action DisableHook;
+        public Action DestroyHook;
+        private void OnEnable() { Enables++; EnableHook?.Invoke(); }
+        private void OnDisable() { Disables++; DisableHook?.Invoke(); }
+        private void OnDestroy() { DestroyHook?.Invoke(); }
     }
 
     internal sealed class FakeViewLoader : IViewLoader
@@ -24,6 +28,8 @@ namespace MXEngine.Tests
         internal bool FailRelease;
         internal int ReleaseCalls;
         internal Func<CancellationToken, UniTask> LoadHook;
+        internal Action<Component> CreatedHook;
+        internal Func<Component, UniTask> ReleaseHook;
         public async UniTask<T> LoadAsync<T>(string key, Transform parent,
             CancellationToken cancellationToken = default) where T : Component
         {
@@ -37,23 +43,24 @@ namespace MXEngine.Tests
             var result = objectInstance.AddComponent<T>();
             Created.Add(result);
             Owned.Add(result);
+            CreatedHook?.Invoke(result);
             return result;
         }
 
-        public UniTask ReleaseAsync(Component view)
+        public async UniTask ReleaseAsync(Component view)
         {
             ReleaseCalls++;
             if (FailRelease) throw new InvalidOperationException("release");
+            if (ReleaseHook != null) await ReleaseHook(view);
             Assert.IsTrue(Owned.Remove(view));
             if (view != null) UnityEngine.Object.DestroyImmediate(view.gameObject);
-            return UniTask.CompletedTask;
         }
     }
 
     public abstract class NavigationTestFixture
     {
         protected const string A = "A", B = "B", C = "C", Modal = "Modal", Overlay = "Overlay";
-        protected FakeViewLoader Loader;
+        private protected FakeViewLoader Loader;
         protected NavigationService Navigation;
         private GameObject _root;
         protected readonly List<Exception> Diagnostics = new List<Exception>();
@@ -61,6 +68,7 @@ namespace MXEngine.Tests
         [SetUp]
         public void SetUp()
         {
+            Diagnostics.Clear();
             _root = new GameObject("UI Root");
             var uiRoot = _root.AddComponent<UIRoot>();
             foreach (string name in new[] { "ScreenRoot", "ModalRoot", "OverlayRoot" })
@@ -114,7 +122,7 @@ namespace MXEngine.Tests
         {
             UniTask pending = test();
             var deadline = DateTime.UtcNow.AddSeconds(5);
-            while (!pending.IsCompleted)
+            while (!pending.GetAwaiter().IsCompleted)
             {
                 Assert.Less(DateTime.UtcNow, deadline, "Async test timed out.");
                 yield return null;

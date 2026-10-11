@@ -117,8 +117,18 @@ always create a new instance, including repeated uses of the same key.
 - `CleanupFailed` reports cleanup errors that occur after navigation has
   committed successfully.
 - Navigation requests are serialized per screen/modal and overlay channel.
-  Requests made from a UI lifecycle callback fail immediately instead of
-  deadlocking the service.
+  Requests made synchronously during managed UI activation or loader calls
+  fail immediately instead of waiting on the gate held by that operation.
+  Defer follow-up navigation until the operation returns.
+  Unity callbacks invoked later by deferred destruction are outside this scope.
+
+Back navigation restores the previous screen before waiting for the outgoing
+instance to be released. If cancellation or activation fails before that
+transition commits, the current screen and its history are restored.
+
+`ShutdownAsync` always attempts cleanup, even when a cancellation callback
+throws. Its result is shared by all callers, including a failure result;
+use `RetryPendingReleasesAsync` to retry any releases left pending.
 
 Pass a `CancellationToken` to any open or close method when a caller owns the
 request lifetime. Cancellation before commit does not remove the current
@@ -139,3 +149,7 @@ screen.
 
 See `Assets/MXEngine/Samples/NavigationDemo` for a complete example covering
 screens, modals, overlays, buttons, Addressables, and returned instances.
+The demo's `GameController` and UI roots are scene-owned; the controller alone
+must not survive their scene. Only the controller shuts down its navigation
+service. The Gameplay button navigates to the gameplay UI without loading
+additional copies of a Unity scene.

@@ -81,9 +81,9 @@ namespace MXEngine
                         {
                             T result = GetComponent<T>(existing, key);
                             OpenView current = _screens.Peek();
-                            SetActive(current, false);
                             try
                             {
+                                SetActive(current, false);
                                 SetActive(existing, true);
                                 token.ThrowIfCancellationRequested();
                             }
@@ -137,10 +137,12 @@ namespace MXEngine
                     {
                         if (committed) throw;
                         Exception recovery = null;
+                        try { SetActive(opened, false); }
+                        catch (Exception exception) { recovery = exception; }
                         if (_screens.Count > 0)
                         {
                             try { SetActive(_screens.Peek(), true); }
-                            catch (Exception exception) { recovery = exception; }
+                            catch (Exception exception) { AddError(ref recovery, exception); }
                         }
                         AddError(ref recovery, await TryReleaseAsync(opened));
                         if (recovery != null)
@@ -234,11 +236,27 @@ namespace MXEngine
                     token.ThrowIfCancellationRequested();
                     if (_screens.Count < 2) return false;
                     OpenView opened = _screens.Pop();
-                    List<Exception> errors = null;
-                    AddError(ref errors, await TryReleaseAsync(opened));
-                    try { SetActive(_screens.Peek(), true); }
-                    catch (Exception exception) { AddError(ref errors, exception); }
-                    if (errors != null) ReportCleanupFailure(new AggregateException("Back navigation cleanup failed.", errors));
+                    OpenView previous = _screens.Peek();
+                    try
+                    {
+                        SetActive(opened, false);
+                        SetActive(previous, true);
+                        token.ThrowIfCancellationRequested();
+                    }
+                    catch (Exception operationException)
+                    {
+                        _screens.Push(opened);
+                        Exception recovery = null;
+                        try { SetActive(previous, false); SetActive(opened, true); }
+                        catch (Exception exception) { recovery = exception; }
+                        if (recovery != null)
+                            throw new AggregateException("Back navigation recovery failed.", operationException, recovery);
+                        throw;
+                    }
+
+                    // The previous screen must be visible even if release is slow or fails.
+                    Exception error = await TryReleaseAsync(opened);
+                    if (error != null) ReportCleanupFailure(error);
                     return true;
                 }
                 finally { _gate.Release(); }
@@ -319,8 +337,11 @@ namespace MXEngine
                 _shutdownRequested = true;
                 _shutdownCompletion = new UniTaskCompletionSource();
             }
-            _lifetime.Cancel();
-            ShutdownCoreAsync().Forget();
+            Exception cancellationError = null;
+            try { _lifetime.Cancel(); }
+            catch (Exception exception) { cancellationError = exception; }
+            // A throwing cancellation callback must not strand the shared completion.
+            ShutdownCoreAsync(cancellationError).Forget();
             return _shutdownCompletion.Task;
         }
 
@@ -351,14 +372,17 @@ namespace MXEngine
             T view = null;
             try
             {
-                view = await _loader.LoadAsync<T>(key, root, token);
+                UniTask<T> load;
+                using (LifecycleContext.Enter())
+                    load = _loader.LoadAsync<T>(key, root, token);
+                view = await load;
                 token.ThrowIfCancellationRequested();
                 if (view == null) throw new InvalidOperationException("Loader returned no UI for " + key + ".");
                 return new OpenView(key, view);
             }
             catch (Exception openException)
             {
-                if (view != null)
+                if (!ReferenceEquals(view, null))
                 {
                     Exception cleanup = await TryReleaseAsync(new OpenView(key, view));
                     if (cleanup != null)
@@ -380,7 +404,10 @@ namespace MXEngine
             catch (Exception exception) { ReportCleanupFailure(exception); }
             try
             {
-                await _loader.ReleaseAsync(opened.View);
+                UniTask release;
+                using (LifecycleContext.Enter())
+                    release = _loader.ReleaseAsync(opened.View);
+                await release;
                 _pendingReleases.Remove(opened);
             }
             catch
@@ -390,7 +417,7 @@ namespace MXEngine
             }
         }
 
-        private async UniTask ShutdownCoreAsync()
+        private async UniTask ShutdownCoreAsync(Exception cancellationError)
         {
             try
             {
@@ -401,6 +428,7 @@ namespace MXEngine
                     try
                     {
                         List<Exception> errors = null;
+                        AddError(ref errors, cancellationError);
                         foreach (OpenView pending in _pendingReleases.ToArray())
                             AddError(ref errors, await TryReleaseAsync(pending));
                         foreach (OpenView overlay in new List<OpenView>(_overlays.Values))
@@ -443,7 +471,12 @@ namespace MXEngine
         private void SetActive(OpenView opened, bool active)
         {
             using (LifecycleContext.Enter())
+            {
+                if (active && (opened.View == null || !opened.View.transform.parent ||
+                    !opened.View.transform.parent.gameObject.activeInHierarchy))
+                    throw new InvalidOperationException("Cannot activate UI with a destroyed view or inactive parent.");
                 if (opened.View != null) opened.View.gameObject.SetActive(active);
+            }
         }
 
         private void ThrowIfUnavailable()

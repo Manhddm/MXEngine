@@ -1,7 +1,6 @@
 using System;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 namespace MXEngine.Samples
@@ -58,16 +57,11 @@ namespace MXEngine.Samples
             closeModalButton.onClick.RemoveListener(OnCloseModal);
             closeAllModalsButton.onClick.RemoveListener(OnCloseAllModals);
             loadingButton.onClick.RemoveListener(OnLoading);
-            _navigation?.ShutdownAsync().Forget(Debug.LogException);
         }
 
         private void OnLobby() => ExecuteAsync(DemoAction.Lobby).Forget();
 
-        private void OnGameplay()
-        {
-            SceneManager.LoadScene("Gameplay", LoadSceneMode.Additive);
-            ExecuteAsync(DemoAction.Gameplay).Forget();
-        }
+        private void OnGameplay() => ExecuteAsync(DemoAction.Gameplay).Forget();
         private void OnSettings() => ExecuteAsync(DemoAction.Settings).Forget();
         private void OnBack() => ExecuteAsync(DemoAction.Back).Forget();
         private void OnCloseModal() => ExecuteAsync(DemoAction.CloseModal).Forget();
