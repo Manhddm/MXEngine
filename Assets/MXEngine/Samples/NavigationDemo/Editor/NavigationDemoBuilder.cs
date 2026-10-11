@@ -101,7 +101,6 @@ namespace MXEngine.Samples.Editor
 
             var demo = canvasObject.GetComponent<NavigationDemo>();
             var demoProperties = new SerializedObject(demo);
-            demoProperties.FindProperty("uiRoot").objectReferenceValue = uiRoot;
             demoProperties.FindProperty("lobbyButton").objectReferenceValue = buttons[0];
             demoProperties.FindProperty("gameplayButton").objectReferenceValue = buttons[1];
             demoProperties.FindProperty("settingsButton").objectReferenceValue = buttons[2];
